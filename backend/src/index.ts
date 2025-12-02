@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { YandexGPTService } from "./yandexService";
-import { executeTool } from "./tools";
 import path from "path";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
@@ -20,102 +19,94 @@ app.use(express.json());
 
 const yandexService = new YandexGPTService();
 
-interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  text?: string;
-  toolCallList?: any;
-  toolResultList?: any;
-}
-
-// Эндпоинт для чата
+// Единственный эндпоинт для структурированного JSON
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, conversationHistory } = req.body;
+    const { message } = req.body;
 
-    if (!message) {
-      return res.status(400).json({ error: "Сообщение обязательно" });
-    }
-
-    // Формируем историю сообщений
-    const messages: ChatMessage[] = conversationHistory || [];
-    messages.push({
-      role: "user",
-      text: message,
-    });
-
-    // Первый запрос к модели
-    let response = await yandexService.sendRequest(messages);
-    let alternative = response.result.alternatives[0];
-
-    // Проверяем, нужно ли вызвать инструменты
-    if (
-      alternative.status === "ALTERNATIVE_STATUS_TOOL_CALLS" &&
-      alternative.message.toolCallList
-    ) {
-      const toolCalls = alternative.message.toolCallList.toolCalls;
-      const toolResults = [];
-
-      // Выполняем каждый вызов инструмента
-      for (const toolCall of toolCalls) {
-        const { name, arguments: args } = toolCall.functionCall;
-        console.log(`Executing tool: ${name} with args:`, args);
-
-        const result = executeTool(name, args);
-        toolResults.push({
-          functionResult: {
-            name,
-            content: result,
-          },
-        });
-      }
-
-      // Добавляем ответ модели с вызовом инструментов
-      messages.push({
-        role: "assistant",
-        toolCallList: alternative.message.toolCallList,
-      });
-
-      // Добавляем результаты выполнения инструментов
-      messages.push({
-        role: "user",
-        toolResultList: {
-          toolResults,
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({
+        status: "error",
+        data: {
+          answer: "Сообщение обязательно и должно быть непустой строкой",
+          confidence: 0,
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+          model: "yandexgpt",
         },
       });
-
-      // Второй запрос к модели с результатами инструментов
-      response = await yandexService.sendRequest(messages);
-      alternative = response.result.alternatives[0];
     }
 
-    // Добавляем финальный ответ в историю
-    messages.push({
-      role: "assistant",
-      text: alternative.message.text,
-    });
+    console.log(`[REQUEST] User: "${message.substring(0, 100)}..."`);
 
-    res.json({
-      response: alternative.message.text,
-      conversationHistory: messages,
-      toolsUsed:
-        alternative.status === "ALTERNATIVE_STATUS_FINAL"
-          ? messages.filter((m) => m.toolCallList).length > 0
-          : false,
-    });
+    const result = await yandexService.getStructuredResponse(message, 3);
+
+    console.log(
+      `[RESPONSE] Status: ${result.status}, Confidence: ${result.data.confidence}`
+    );
+
+    res.json(result);
   } catch (error: any) {
-    console.error("Error:", error);
+    console.error("[ERROR] Chat endpoint:", error);
     res.status(500).json({
-      error: "Ошибка сервера",
-      details: error.message,
+      status: "error",
+      data: {
+        answer: "Внутренняя ошибка сервера",
+        confidence: 0,
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        model: "yandexgpt",
+      },
     });
   }
 });
 
-// Проверка здоровья сервера
+// Проверка здоровья
 app.get("/api/health", (req, res) => {
-  res.json({ status: "OK", timestamp: new Date().toISOString() });
+  res.json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    service: "yandex-gpt-structured",
+  });
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: "Endpoint not found",
+    availableEndpoints: ["/api/chat", "/api/health"],
+  });
 });
+
+// Global error handler
+app.use(
+  (
+    err: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error("[GLOBAL ERROR]", err);
+    res.status(500).json({
+      status: "error",
+      data: {
+        answer: "Внутренняя ошибка сервера",
+        confidence: 0,
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        model: "yandexgpt",
+      },
+    });
+  }
+);
+
+app.listen(PORT, () => {
+  console.log(`🚀 Backend running on port ${PORT}`);
+  console.log(`📡 Endpoint: POST http://localhost:${PORT}/api/chat`);
+  console.log(`❤️  Health: GET http://localhost:${PORT}/api/health`);
+});
+
+export default app;
