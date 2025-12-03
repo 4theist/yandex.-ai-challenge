@@ -1,28 +1,53 @@
 import React, { useState, useRef, useEffect } from "react";
 import { DisplayMessage } from "../../types";
-import { sendMessage, checkHealth } from "../../api";
+import {
+  sendMessage,
+  checkHealth,
+  createSession,
+  resetSession,
+} from "../../api";
+import { AgentResponse } from "../../types";
 
 const messageAnimation: React.CSSProperties = {
   animation: "slideIn 0.3s ease-out",
 };
 
 export const ChatInterface: React.FC = () => {
+  // sessionId и статус завершения
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isComplete, setIsComplete] = useState(false);
+
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  //  Создание сессии при монтировании
   useEffect(() => {
-    checkHealth().then(setIsApiHealthy);
+    async function init() {
+      try {
+        const healthData = await checkHealth();
+        setIsApiHealthy(healthData.status === "OK");
+
+        const newSessionId = await createSession();
+        setSessionId(newSessionId);
+        console.log("[SESSION CREATED]", newSessionId);
+      } catch (error) {
+        console.error("[INIT ERROR]", error);
+        setIsApiHealthy(false);
+      }
+    }
+    init();
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  //  функция отправки с sessionId
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !sessionId) return;
 
     const userMessage: DisplayMessage = {
       id: Date.now().toString(),
@@ -39,23 +64,30 @@ export const ChatInterface: React.FC = () => {
       const processingMsg: DisplayMessage = {
         id: `processing-${Date.now()}`,
         role: "assistant",
-        content: "⏳ Обрабатываю запрос...",
+        content: "⏳ Думаю...",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, processingMsg]);
 
-      const response = await sendMessage(input);
+      const response: AgentResponse = await sendMessage(input, sessionId);
 
       setMessages((prev) => prev.filter((m) => m.id !== processingMsg.id));
 
+      // обработка ответа
       const assistantMessage: DisplayMessage = {
         id: `response-${Date.now()}`,
         role: "assistant",
-        content: response.data.answer,
-        parsedData: response,
+        content: "", // Будет заполнено в рендере
+        agentResponse: response,
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, assistantMessage]);
+
+      // Проверяем завершение диалога
+      if (response.status === "ready") {
+        setIsComplete(true);
+      }
     } catch (error: any) {
       setMessages((prev) =>
         prev.filter((m) => !m.id.startsWith("processing-"))
@@ -73,44 +105,127 @@ export const ChatInterface: React.FC = () => {
     }
   };
 
+  //  функция для начала нового диалога
+  const handleNewConversation = async () => {
+    try {
+      setIsLoading(true);
+
+      if (sessionId) {
+        await resetSession(sessionId);
+      }
+
+      const newSessionId = await createSession();
+      setSessionId(newSessionId);
+      setMessages([]);
+      setIsComplete(false);
+
+      console.log("[NEW CONVERSATION]", newSessionId);
+    } catch (error: any) {
+      console.error("[RESET ERROR]", error);
+      alert(`Ошибка при создании новой сессии: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatResultAsText = (result: any): string => {
+    if (!result || typeof result !== "object") {
+      return String(result);
+    }
+
+    const lines: string[] = [];
+
+    // Рекурсивная функция форматирования
+    const formatValue = (key: string, value: any, indent: number = 0): void => {
+      const prefix = "  ".repeat(indent);
+
+      if (Array.isArray(value)) {
+        // Массив - заголовок и элементы списком
+        lines.push(`${prefix}${key}:`);
+        value.forEach((item) => {
+          if (typeof item === "object" && item !== null) {
+            // Если объект в массиве - форматируем его поля
+            Object.entries(item).forEach(([k, v]) => {
+              lines.push(`${prefix}  - ${k}: ${v}`);
+            });
+          } else {
+            lines.push(`${prefix}  - ${item}`);
+          }
+        });
+      } else if (typeof value === "object" && value !== null) {
+        // Вложенный объект - заголовок и рекурсивная обработка
+        lines.push(`${prefix}${key}:`);
+        Object.entries(value).forEach(([k, v]) => {
+          formatValue(k, v, indent + 1);
+        });
+      } else {
+        // Простое значение
+        lines.push(`${prefix}${key}: ${value}`);
+      }
+    };
+
+    // Обрабатываем все поля корневого объекта
+    Object.entries(result).forEach(([key, value]) => {
+      formatValue(key, value, 0);
+      lines.push(""); // Пустая строка между секциями
+    });
+
+    // Убираем последнюю пустую строку
+    if (lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+
+    return lines.join("\n");
+  };
+
   const renderMessage = (msg: DisplayMessage) => {
-    if (msg.parsedData) {
+    if (msg.agentResponse) {
+      const response = msg.agentResponse;
+
       return (
         <div style={styles.structuredResponse}>
-          <div style={styles.answerText}>{msg.parsedData.data.answer}</div>
+          {/* Режим сбора информации */}
+          {response.status === "collecting" && response.question && (
+            <div style={styles.questionText}>{response.question}</div>
+          )}
 
+          {/* Финальный результат - простой текст */}
+          {response.status === "ready" && response.result && (
+            <div style={styles.resultText}>
+              {formatResultAsText(response.result)}
+            </div>
+          )}
+
+          {/* Метаданные */}
           <div style={styles.metadataSection}>
             <div style={styles.metadataRow}>
               <span
                 style={{
                   ...styles.statusBadge,
-                  ...(msg.parsedData.status === "success"
-                    ? styles.statusSuccess
-                    : styles.statusError),
+                  ...(response.status === "collecting"
+                    ? styles.statusCollecting
+                    : styles.statusReady),
                 }}
               >
-                {msg.parsedData.status === "success" ? "✓ Success" : "✗ Error"}
+                {response.status === "collecting" ? "Сбор данных" : "Готово"}
               </span>
-              <span style={styles.confidenceValue}>
-                Confidence: {(msg.parsedData.data.confidence * 100).toFixed(0)}%
-              </span>
+              <span style={styles.confidenceValue}>{response.confidence}%</span>
             </div>
+
             <div style={styles.confidenceBar}>
               <div
                 style={{
                   ...styles.confidenceBarFill,
-                  width: `${msg.parsedData.data.confidence * 100}%`,
+                  width: `${response.confidence}%`,
                 }}
               />
             </div>
-            <div style={styles.metadataFooter}>
-              <span>Model: {msg.parsedData.metadata.model}</span>
-              <span>
-                {new Date(msg.parsedData.metadata.timestamp).toLocaleString(
-                  "ru-RU"
-                )}
-              </span>
-            </div>
+
+            {response.reasoning && (
+              <div style={styles.reasoningBlock}>
+                <span style={styles.reasoningText}>{response.reasoning}</span>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -118,21 +233,29 @@ export const ChatInterface: React.FC = () => {
 
     return <div style={styles.messageContent}>{msg.content}</div>;
   };
-
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>YandexGPT Structured JSON Agent</h1>
+        <h1 style={styles.title}>🤖 AI Агент-Сборщик</h1>
         <p style={styles.subtitle}>
-          Структурированные ответы с confidence метрикой
+          Умный помощник, который задает вопросы и собирает информацию
         </p>
-        <div style={styles.healthIndicator}>
-          {isApiHealthy === null && <span>⏳ Проверка...</span>}
-          {isApiHealthy === true && (
-            <span style={{ color: "#10b981" }}>✓ API работает</span>
-          )}
-          {isApiHealthy === false && (
-            <span style={{ color: "#ef4444" }}>✗ API недоступен</span>
+
+        <div style={styles.headerInfo}>
+          <div style={styles.healthIndicator}>
+            {isApiHealthy === null && <span>⏳ Проверка...</span>}
+            {isApiHealthy === true && (
+              <span style={{ color: "#10b981" }}>✓ API работает</span>
+            )}
+            {isApiHealthy === false && (
+              <span style={{ color: "#ef4444" }}>✗ API недоступен</span>
+            )}
+          </div>
+
+          {sessionId && (
+            <div style={styles.sessionInfo}>
+              Session: {sessionId.substring(0, 8)}...
+            </div>
           )}
         </div>
       </div>
@@ -140,13 +263,22 @@ export const ChatInterface: React.FC = () => {
       <div style={styles.messagesContainer}>
         {messages.length === 0 && (
           <div style={styles.emptyState}>
-            <p>👋 Привет! Я возвращаю структурированные JSON-ответы.</p>
-            <p>Попробуй спросить:</p>
-            <ul style={styles.examplesList}>
-              <li>"Кто изобрел JavaScript?"</li>
-              <li>"Объясни что такое React Hooks"</li>
-              <li>"Какая столица Японии?"</li>
-            </ul>
+            <p style={styles.emptyStateTitle}>
+              👋 Привет! Я умный агент-сборщик информации
+            </p>
+            <p style={styles.emptyStateText}>
+              Я задам уточняющие вопросы и соберу всю нужную информацию, чтобы
+              дать тебе детальный ответ
+            </p>
+            <div style={styles.examplesBlock}>
+              <p style={styles.examplesTitle}>Попробуй спросить:</p>
+              <ul style={styles.examplesList}>
+                <li>"Хочу рецепт вкусной пиццы"</li>
+                <li>"Помоги собрать игровой компьютер"</li>
+                <li>"Составь план тренировки"</li>
+                <li>"Посоветуй маршрут путешествия"</li>
+              </ul>
+            </div>
           </div>
         )}
 
@@ -177,36 +309,63 @@ export const ChatInterface: React.FC = () => {
       </div>
 
       <div style={styles.inputContainer}>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder="Введите сообщение..."
-          style={styles.input}
-          disabled={isLoading || isApiHealthy === false}
-          rows={2}
-        />
-        <button
-          onClick={handleSend}
-          disabled={!input.trim() || isLoading || isApiHealthy === false}
-          style={{
-            ...styles.button,
-            ...(!input.trim() || isLoading || isApiHealthy === false
-              ? styles.buttonDisabled
-              : {}),
-          }}
-        >
-          {isLoading ? "⏳" : "📤"} Отправить
-        </button>
+        {isComplete ? (
+          // Кнопка нового диалога
+          <button
+            onClick={handleNewConversation}
+            disabled={isLoading}
+            style={{
+              ...styles.button,
+              ...styles.newConversationButton,
+              ...(isLoading ? styles.buttonDisabled : {}),
+            }}
+          >
+            {isLoading ? "⏳ Создаю..." : "🔄 Начать новый диалог"}
+          </button>
+        ) : (
+          // Обычный инпут
+          <>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="Введите ответ или новый запрос..."
+              style={styles.input}
+              disabled={isLoading || isApiHealthy === false || !sessionId}
+              rows={2}
+            />
+            <button
+              onClick={handleSend}
+              disabled={
+                !input.trim() ||
+                isLoading ||
+                isApiHealthy === false ||
+                !sessionId
+              }
+              style={{
+                ...styles.button,
+                ...(!input.trim() ||
+                isLoading ||
+                isApiHealthy === false ||
+                !sessionId
+                  ? styles.buttonDisabled
+                  : {}),
+              }}
+            >
+              {isLoading ? "⏳" : "📤"} Отправить
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 };
+
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
@@ -214,12 +373,12 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100vh",
     maxWidth: "1000px",
     margin: "0 auto",
-    backgroundColor: "#0f172a", // Темный фон (dark mode тренд)
+    backgroundColor: "#0f172a",
     fontFamily:
       '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   header: {
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", // Градиент
+    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
     color: "white",
     padding: "32px 24px",
     textAlign: "center",
@@ -231,16 +390,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "32px",
     fontWeight: "700",
     letterSpacing: "-0.02em",
-    background: "linear-gradient(to right, #ffffff, #e0e7ff)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
   },
   subtitle: {
     margin: "0 0 16px 0",
     fontSize: "15px",
     opacity: 0.95,
     fontWeight: "400",
-    letterSpacing: "0.01em",
+  },
+  headerInfo: {
+    display: "flex",
+    justifyContent: "center",
+    gap: "16px",
+    flexWrap: "wrap",
   },
   healthIndicator: {
     fontSize: "13px",
@@ -249,7 +410,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "20px",
     backgroundColor: "rgba(255, 255, 255, 0.15)",
     backdropFilter: "blur(10px)",
-    display: "inline-block",
+  },
+  sessionInfo: {
+    fontSize: "12px",
+    fontWeight: "500",
+    padding: "6px 12px",
+    borderRadius: "20px",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    fontFamily: "monospace",
   },
   messagesContainer: {
     flex: 1,
@@ -258,7 +426,6 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: "16px",
-    // Custom scrollbar для современного вида
     scrollbarWidth: "thin",
     scrollbarColor: "#475569 #1e293b",
   },
@@ -269,15 +436,36 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "600px",
     margin: "auto",
   },
+  emptyStateTitle: {
+    fontSize: "20px",
+    fontWeight: "600",
+    marginBottom: "12px",
+    color: "#e2e8f0",
+  },
+  emptyStateText: {
+    fontSize: "15px",
+    lineHeight: "1.6",
+    marginBottom: "24px",
+  },
+  examplesBlock: {
+    marginTop: "32px",
+  },
+  examplesTitle: {
+    fontSize: "14px",
+    fontWeight: "600",
+    marginBottom: "12px",
+    color: "#cbd5e1",
+  },
   examplesList: {
     textAlign: "left",
     display: "inline-block",
-    marginTop: "20px",
-    padding: "20px",
+    padding: "20px 24px",
     backgroundColor: "rgba(100, 116, 139, 0.1)",
     borderRadius: "12px",
     border: "1px solid rgba(148, 163, 184, 0.2)",
     listStyle: "none",
+    fontSize: "14px",
+    lineHeight: "2",
   },
   message: {
     padding: "16px 20px",
@@ -285,7 +473,6 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "75%",
     wordWrap: "break-word",
     boxShadow: "0 2px 12px rgba(0, 0, 0, 0.08)",
-    transition: "transform 0.2s ease, box-shadow 0.2s ease",
   },
   userMessage: {
     alignSelf: "flex-end",
@@ -295,7 +482,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   assistantMessage: {
     alignSelf: "flex-start",
-    backgroundColor: "#1e293b", // Темная карточка
+    backgroundColor: "#1e293b",
     border: "1px solid #334155",
     color: "#e2e8f0",
   },
@@ -313,7 +500,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "11px",
     fontWeight: "400",
     opacity: 0.6,
-    textTransform: "none",
   },
   messageContent: {
     lineHeight: "1.7",
@@ -325,13 +511,73 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: "16px",
   },
-  answerText: {
+
+  questionText: {
+    fontSize: "16px",
+    lineHeight: "1.6",
+    color: "#f1f5f9",
+    fontWeight: "500",
+  },
+
+  missingInfoBlock: {
+    backgroundColor: "rgba(51, 65, 85, 0.4)",
+    padding: "12px",
+    borderRadius: "8px",
+    borderLeft: "3px solid #667eea",
+  },
+  missingInfoLabel: {
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#94a3b8",
+    marginBottom: "8px",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  },
+  missingInfoList: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+  },
+  missingInfoTag: {
+    fontSize: "12px",
+    padding: "4px 10px",
+    backgroundColor: "rgba(102, 126, 234, 0.2)",
+    color: "#a5b4fc",
+    borderRadius: "12px",
+    border: "1px solid rgba(102, 126, 234, 0.3)",
+  },
+
+  resultBlock: {
+    backgroundColor: "rgba(16, 185, 129, 0.1)",
+    border: "1px solid rgba(16, 185, 129, 0.3)",
+    borderRadius: "12px",
+    padding: "16px",
+  },
+  resultHeader: {
+    fontSize: "16px",
+    fontWeight: "600",
+    color: "#10b981",
+    marginBottom: "12px",
+  },
+  resultContent: {
+    fontSize: "13px",
+    lineHeight: "1.6",
+    color: "#e2e8f0",
+    backgroundColor: "rgba(15, 23, 42, 0.8)",
+    padding: "12px",
+    borderRadius: "8px",
+    overflowX: "auto",
+    fontFamily: "'Fira Code', 'Consolas', monospace",
+  },
+  resultText: {
     fontSize: "15px",
     lineHeight: "1.7",
-    color: "#f1f5f9",
-    paddingBottom: "16px",
-    borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
-    fontWeight: "400",
+    color: "#e2e8f0",
+    whiteSpace: "pre-wrap",
+    fontFamily: "inherit",
+    padding: "12px",
+    backgroundColor: "rgba(51, 65, 85, 0.3)",
+    borderRadius: "8px",
   },
   metadataSection: {
     fontSize: "13px",
@@ -353,22 +599,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: "0.05em",
-    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
   },
-  statusSuccess: {
-    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+  statusCollecting: {
+    background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",
     color: "white",
   },
-  statusError: {
-    background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+  statusReady: {
+    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
     color: "white",
   },
   confidenceValue: {
     fontWeight: "700",
     fontSize: "14px",
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
+    color: "#a5b4fc",
   },
   confidenceBar: {
     height: "8px",
@@ -376,20 +619,31 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "4px",
     overflow: "hidden",
     marginBottom: "10px",
-    boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)",
   },
   confidenceBarFill: {
     height: "100%",
     background: "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
     transition: "width 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
-    boxShadow: "0 0 10px rgba(102, 126, 234, 0.5)",
   },
-  metadataFooter: {
+
+  reasoningBlock: {
     display: "flex",
-    justifyContent: "space-between",
-    fontSize: "11px",
-    color: "#94a3b8",
-    marginTop: "4px",
+    gap: "8px",
+    alignItems: "flex-start",
+    marginTop: "8px",
+    padding: "8px",
+    backgroundColor: "rgba(100, 116, 139, 0.2)",
+    borderRadius: "6px",
+  },
+  reasoningIcon: {
+    fontSize: "14px",
+    flexShrink: 0,
+  },
+  reasoningText: {
+    fontSize: "12px",
+    color: "#cbd5e1",
+    lineHeight: "1.5",
+    fontStyle: "italic",
   },
   inputContainer: {
     padding: "20px",
@@ -410,7 +664,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "inherit",
     resize: "none",
     outline: "none",
-    transition: "border-color 0.2s ease, box-shadow 0.2s ease",
   },
   button: {
     padding: "14px 28px",
@@ -421,13 +674,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "15px",
     fontWeight: "600",
     cursor: "pointer",
-    transition: "transform 0.2s ease, box-shadow 0.2s ease",
     boxShadow: "0 4px 16px rgba(102, 126, 234, 0.3)",
+    whiteSpace: "nowrap",
   },
   buttonDisabled: {
     background: "linear-gradient(135deg, #475569 0%, #334155 100%)",
     cursor: "not-allowed",
     opacity: 0.6,
     boxShadow: "none",
+  },
+
+  newConversationButton: {
+    flex: 1,
+    fontSize: "16px",
+    padding: "16px 32px",
   },
 };
