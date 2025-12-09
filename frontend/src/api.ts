@@ -2,7 +2,8 @@ import axios from "axios";
 import { AgentResponse } from "./types";
 
 const API_BASE_URL = "";
-//  создание сессии
+
+// Создание сессии
 export async function createSession(): Promise<string> {
   try {
     const response = await axios.post<{ sessionId: string }>(
@@ -19,10 +20,11 @@ export async function createSession(): Promise<string> {
   }
 }
 
-//   отправка сообщения с sessionId
+// Отправка сообщения с sessionId и temperature
 export async function sendMessage(
   message: string,
-  sessionId: string
+  sessionId: string,
+  temperature: number = 0.3
 ): Promise<AgentResponse> {
   try {
     const response = await axios.post<AgentResponse>(
@@ -30,6 +32,7 @@ export async function sendMessage(
       {
         message,
         sessionId,
+        temperature,
       },
       { timeout: 30000 }
     );
@@ -37,6 +40,7 @@ export async function sendMessage(
     console.log("[MESSAGE SENT]", {
       status: response.data.status,
       confidence: response.data.confidence,
+      temperature,
     });
 
     return response.data;
@@ -59,7 +63,7 @@ export async function sendMessage(
   }
 }
 
-//  получение истории сессии
+// Получение истории сессии
 export async function getSessionHistory(sessionId: string): Promise<{
   sessionId: string;
   isComplete: boolean;
@@ -70,6 +74,7 @@ export async function getSessionHistory(sessionId: string): Promise<{
     status?: string;
     confidence?: number;
     reasoning?: string;
+    temperature?: number;
   }>;
 }> {
   try {
@@ -90,7 +95,7 @@ export async function getSessionHistory(sessionId: string): Promise<{
   }
 }
 
-//  функция: сброс сессии
+// Сброс сессии
 export async function resetSession(sessionId: string): Promise<void> {
   try {
     await axios.post(
@@ -111,7 +116,7 @@ export async function resetSession(sessionId: string): Promise<void> {
   }
 }
 
-// health check с информацией о сессиях
+// Health check с информацией о сессиях
 export async function checkHealth(): Promise<{
   status: string;
   activeSessions: number;

@@ -16,20 +16,19 @@ export const ChatInterface: React.FC = () => {
   // sessionId и статус завершения
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
-
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
+  const [temperature, setTemperature] = useState<number>(0.3);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  //  Создание сессии при монтировании
+  // Создание сессии при монтировании
   useEffect(() => {
     async function init() {
       try {
         const healthData = await checkHealth();
         setIsApiHealthy(healthData.status === "OK");
-
         const newSessionId = await createSession();
         setSessionId(newSessionId);
         console.log("[SESSION CREATED]", newSessionId);
@@ -45,7 +44,7 @@ export const ChatInterface: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  //  функция отправки с sessionId
+  // функция отправки с sessionId и temperature
   const handleSend = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
 
@@ -67,9 +66,15 @@ export const ChatInterface: React.FC = () => {
         content: "⏳ Думаю...",
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, processingMsg]);
 
-      const response: AgentResponse = await sendMessage(input, sessionId);
+      // Передаем temperature в API
+      const response: AgentResponse = await sendMessage(
+        input,
+        sessionId,
+        temperature
+      );
 
       setMessages((prev) => prev.filter((m) => m.id !== processingMsg.id));
 
@@ -92,7 +97,6 @@ export const ChatInterface: React.FC = () => {
       setMessages((prev) =>
         prev.filter((m) => !m.id.startsWith("processing-"))
       );
-
       const errorMessage: DisplayMessage = {
         id: `error-${Date.now()}`,
         role: "assistant",
@@ -105,11 +109,10 @@ export const ChatInterface: React.FC = () => {
     }
   };
 
-  //  функция для начала нового диалога
+  // функция для начала нового диалога
   const handleNewConversation = async () => {
     try {
       setIsLoading(true);
-
       if (sessionId) {
         await resetSession(sessionId);
       }
@@ -118,7 +121,6 @@ export const ChatInterface: React.FC = () => {
       setSessionId(newSessionId);
       setMessages([]);
       setIsComplete(false);
-
       console.log("[NEW CONVERSATION]", newSessionId);
     } catch (error: any) {
       console.error("[RESET ERROR]", error);
@@ -181,7 +183,6 @@ export const ChatInterface: React.FC = () => {
   const renderMessage = (msg: DisplayMessage) => {
     if (msg.agentResponse) {
       const response = msg.agentResponse;
-
       return (
         <div style={styles.structuredResponse}>
           {/* Режим сбора информации */}
@@ -191,8 +192,10 @@ export const ChatInterface: React.FC = () => {
 
           {/* Финальный результат - простой текст */}
           {response.status === "ready" && response.result && (
-            <div style={styles.resultText}>
-              {formatResultAsText(response.result)}
+            <div style={styles.resultBlock}>
+              <div style={styles.resultText}>
+                {formatResultAsText(response.result)}
+              </div>
             </div>
           )}
 
@@ -211,7 +214,6 @@ export const ChatInterface: React.FC = () => {
               </span>
               <span style={styles.confidenceValue}>{response.confidence}%</span>
             </div>
-
             <div style={styles.confidenceBar}>
               <div
                 style={{
@@ -220,9 +222,9 @@ export const ChatInterface: React.FC = () => {
                 }}
               />
             </div>
-
             {response.reasoning && (
               <div style={styles.reasoningBlock}>
+                <span style={styles.reasoningIcon}>💭</span>
                 <span style={styles.reasoningText}>{response.reasoning}</span>
               </div>
             )}
@@ -233,6 +235,7 @@ export const ChatInterface: React.FC = () => {
 
     return <div style={styles.messageContent}>{msg.content}</div>;
   };
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -242,36 +245,59 @@ export const ChatInterface: React.FC = () => {
         </p>
 
         <div style={styles.headerInfo}>
-          <div style={styles.healthIndicator}>
-            {isApiHealthy === null && <span>⏳ Проверка...</span>}
-            {isApiHealthy === true && (
-              <span style={{ color: "#10b981" }}>✓ API работает</span>
-            )}
-            {isApiHealthy === false && (
-              <span style={{ color: "#ef4444" }}>✗ API недоступен</span>
-            )}
-          </div>
-
-          {sessionId && (
-            <div style={styles.sessionInfo}>
-              Session: {sessionId.substring(0, 8)}...
-            </div>
+          {isApiHealthy === null && (
+            <span style={styles.healthIndicator}>⏳ Проверка...</span>
           )}
+          {isApiHealthy === true && (
+            <span style={styles.healthIndicator}>✓ API работает</span>
+          )}
+          {isApiHealthy === false && (
+            <span style={styles.healthIndicator}>✗ API недоступен</span>
+          )}
+          {sessionId && (
+            <span style={styles.sessionInfo}>
+              Session: {sessionId.substring(0, 8)}...
+            </span>
+          )}
+        </div>
+
+        {/* Контрол температуры */}
+        <div style={styles.temperatureControl}>
+          <div style={styles.temperatureLabel}>
+            <span>🌡️ Температура</span>
+            <span style={styles.temperatureValue}>
+              {temperature.toFixed(1)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1.2"
+            step="0.1"
+            value={temperature}
+            onChange={(e) => setTemperature(parseFloat(e.target.value))}
+            style={styles.temperatureSlider}
+          />
+          <div style={styles.temperatureHints}>
+            <span style={styles.temperatureHint}>0 - Точность</span>
+            <span style={styles.temperatureHint}>0.7 - Баланс</span>
+            <span style={styles.temperatureHint}>1.2 - Креатив</span>
+          </div>
         </div>
       </div>
 
       <div style={styles.messagesContainer}>
         {messages.length === 0 && (
           <div style={styles.emptyState}>
-            <p style={styles.emptyStateTitle}>
+            <div style={styles.emptyStateTitle}>
               👋 Привет! Я умный агент-сборщик информации
-            </p>
+            </div>
             <p style={styles.emptyStateText}>
               Я задам уточняющие вопросы и соберу всю нужную информацию, чтобы
               дать тебе детальный ответ
             </p>
             <div style={styles.examplesBlock}>
-              <p style={styles.examplesTitle}>Попробуй спросить:</p>
+              <div style={styles.examplesTitle}>Попробуй спросить:</div>
               <ul style={styles.examplesList}>
                 <li>"Хочу рецепт вкусной пиццы"</li>
                 <li>"Помоги собрать игровой компьютер"</li>
@@ -287,10 +313,10 @@ export const ChatInterface: React.FC = () => {
             key={msg.id}
             style={{
               ...styles.message,
-              ...messageAnimation,
               ...(msg.role === "user"
                 ? styles.userMessage
                 : styles.assistantMessage),
+              ...messageAnimation,
             }}
           >
             <div style={styles.messageHeader}>
@@ -313,12 +339,12 @@ export const ChatInterface: React.FC = () => {
           // Кнопка нового диалога
           <button
             onClick={handleNewConversation}
-            disabled={isLoading}
             style={{
               ...styles.button,
               ...styles.newConversationButton,
               ...(isLoading ? styles.buttonDisabled : {}),
             }}
+            disabled={isLoading}
           >
             {isLoading ? "⏳ Создаю..." : "🔄 Начать новый диалог"}
           </button>
@@ -341,21 +367,13 @@ export const ChatInterface: React.FC = () => {
             />
             <button
               onClick={handleSend}
-              disabled={
-                !input.trim() ||
-                isLoading ||
-                isApiHealthy === false ||
-                !sessionId
-              }
               style={{
                 ...styles.button,
-                ...(!input.trim() ||
-                isLoading ||
-                isApiHealthy === false ||
-                !sessionId
+                ...(isLoading || !input.trim() || !sessionId
                   ? styles.buttonDisabled
                   : {}),
               }}
+              disabled={isLoading || !input.trim() || !sessionId}
             >
               {isLoading ? "⏳" : "📤"} Отправить
             </button>
@@ -418,6 +436,53 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "20px",
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     fontFamily: "monospace",
+  },
+  temperatureControl: {
+    marginTop: "20px",
+    padding: "16px 20px",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: "12px",
+    backdropFilter: "blur(10px)",
+    maxWidth: "600px",
+    margin: "20px auto 0",
+  },
+  temperatureLabel: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "10px",
+    fontSize: "14px",
+    fontWeight: "600",
+  },
+  temperatureValue: {
+    fontSize: "16px",
+    fontWeight: "700",
+    padding: "4px 12px",
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    borderRadius: "8px",
+    fontFamily: "monospace",
+  },
+  temperatureSlider: {
+    width: "100%",
+    height: "6px",
+    borderRadius: "3px",
+    background: "linear-gradient(90deg, #10b981 0%, #f59e0b 50%, #ef4444 100%)",
+    outline: "none",
+    cursor: "pointer",
+    WebkitAppearance: "none",
+    appearance: "none",
+    marginBottom: "10px",
+  },
+  temperatureHints: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: "11px",
+    opacity: 0.8,
+    fontWeight: "500",
+  },
+  temperatureHint: {
+    textAlign: "center",
+    flex: 1,
   },
   messagesContainer: {
     flex: 1,
@@ -511,63 +576,17 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: "16px",
   },
-
   questionText: {
     fontSize: "16px",
     lineHeight: "1.6",
     color: "#f1f5f9",
     fontWeight: "500",
   },
-
-  missingInfoBlock: {
-    backgroundColor: "rgba(51, 65, 85, 0.4)",
-    padding: "12px",
-    borderRadius: "8px",
-    borderLeft: "3px solid #667eea",
-  },
-  missingInfoLabel: {
-    fontSize: "12px",
-    fontWeight: "600",
-    color: "#94a3b8",
-    marginBottom: "8px",
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-  },
-  missingInfoList: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-  },
-  missingInfoTag: {
-    fontSize: "12px",
-    padding: "4px 10px",
-    backgroundColor: "rgba(102, 126, 234, 0.2)",
-    color: "#a5b4fc",
-    borderRadius: "12px",
-    border: "1px solid rgba(102, 126, 234, 0.3)",
-  },
-
   resultBlock: {
     backgroundColor: "rgba(16, 185, 129, 0.1)",
     border: "1px solid rgba(16, 185, 129, 0.3)",
     borderRadius: "12px",
     padding: "16px",
-  },
-  resultHeader: {
-    fontSize: "16px",
-    fontWeight: "600",
-    color: "#10b981",
-    marginBottom: "12px",
-  },
-  resultContent: {
-    fontSize: "13px",
-    lineHeight: "1.6",
-    color: "#e2e8f0",
-    backgroundColor: "rgba(15, 23, 42, 0.8)",
-    padding: "12px",
-    borderRadius: "8px",
-    overflowX: "auto",
-    fontFamily: "'Fira Code', 'Consolas', monospace",
   },
   resultText: {
     fontSize: "15px",
@@ -625,7 +644,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "linear-gradient(90deg, #667eea 0%, #764ba2 100%)",
     transition: "width 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
   },
-
   reasoningBlock: {
     display: "flex",
     gap: "8px",
@@ -683,7 +701,6 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.6,
     boxShadow: "none",
   },
-
   newConversationButton: {
     flex: 1,
     fontSize: "16px",

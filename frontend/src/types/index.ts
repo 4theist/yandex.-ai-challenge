@@ -18,6 +18,7 @@ export interface AgentResponse {
   question: string;
   result: any;
   confidence: number;
+  temperature?: number;
 }
 
 // ========================================
@@ -29,6 +30,7 @@ export interface DisplayMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  temperature?: number;
   agentResponse?: AgentResponse; // Полный ответ агента для рендеринга
 }
 
@@ -42,6 +44,7 @@ export interface ConversationState {
   isLoading: boolean;
   isComplete: boolean;
   error: string | null;
+  currentTemperature: number;
 }
 
 // ========================================
@@ -63,6 +66,7 @@ export interface SessionHistoryResponse {
     status?: string;
     confidence?: number;
     reasoning?: string;
+    temperature?: number;
   }>;
 }
 
