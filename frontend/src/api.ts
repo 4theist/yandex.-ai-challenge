@@ -1,60 +1,42 @@
 import axios from "axios";
-import { AgentResponse } from "./types";
+import { ModelsConfig, ModelResult, CompareResponse } from "./types";
 
 const API_BASE_URL = "";
 
-// Создание сессии
-export async function createSession(): Promise<string> {
+// Получить список моделей
+export async function getModels(): Promise<ModelsConfig> {
   try {
-    const response = await axios.post<{ sessionId: string }>(
-      `${API_BASE_URL}/api/session/create`,
-      {},
-      { timeout: 5000 }
-    );
-
-    console.log("[SESSION CREATED]", response.data.sessionId);
-    return response.data.sessionId;
+    const response = await axios.get(`${API_BASE_URL}/api/models`);
+    return response.data;
   } catch (error: any) {
-    console.error("[SESSION CREATE ERROR]", error);
-    throw new Error("Не удалось создать сессию");
+    console.error("[GET MODELS ERROR]", error);
+    throw new Error("Не удалось получить список моделей");
   }
 }
 
-// Отправка сообщения с sessionId и temperature
-export async function sendMessage(
+// Single mode - одна модель
+export async function sendToModel(
   message: string,
-  sessionId: string,
-  temperature: number = 0.3
-): Promise<AgentResponse> {
+  temperature: number,
+  provider: string,
+  model: string
+): Promise<ModelResult> {
   try {
-    const response = await axios.post<AgentResponse>(
+    const response = await axios.post(
       `${API_BASE_URL}/api/chat`,
       {
         message,
-        sessionId,
         temperature,
+        provider,
+        model,
       },
-      { timeout: 30000 }
+      {
+        timeout: 60000,
+      }
     );
-
-    console.log("[MESSAGE SENT]", {
-      status: response.data.status,
-      confidence: response.data.confidence,
-      temperature,
-    });
-
     return response.data;
   } catch (error: any) {
     console.error("[SEND MESSAGE ERROR]", error);
-
-    if (error.code === "ECONNABORTED") {
-      throw new Error("Превышено время ожидания (30с)");
-    }
-
-    if (error.response?.status === 400) {
-      throw new Error(error.response.data?.error || "Неверный запрос");
-    }
-
     throw new Error(
       error.response?.data?.error ||
         error.response?.data?.details ||
@@ -63,63 +45,41 @@ export async function sendMessage(
   }
 }
 
-// Получение истории сессии
-export async function getSessionHistory(sessionId: string): Promise<{
-  sessionId: string;
-  isComplete: boolean;
-  messageCount: number;
-  history: Array<{
-    role: string;
-    content: string;
-    status?: string;
-    confidence?: number;
-    reasoning?: string;
-    temperature?: number;
-  }>;
-}> {
+// Compare mode - две модели
+export async function compareModels(
+  message: string,
+  temperature: number,
+  model1: { provider: string; model: string },
+  model2: { provider: string; model: string }
+): Promise<CompareResponse> {
   try {
-    const response = await axios.get(
-      `${API_BASE_URL}/api/session/${sessionId}/history`,
-      { timeout: 5000 }
+    const response = await axios.post(
+      `${API_BASE_URL}/api/compare`,
+      {
+        message,
+        temperature,
+        model1,
+        model2,
+      },
+      {
+        timeout: 120000, // 2 минуты для двух моделей
+      }
     );
-
     return response.data;
   } catch (error: any) {
-    console.error("[GET HISTORY ERROR]", error);
-
-    if (error.response?.status === 404) {
-      throw new Error("Сессия не найдена");
-    }
-
-    throw new Error("Не удалось получить историю сессии");
-  }
-}
-
-// Сброс сессии
-export async function resetSession(sessionId: string): Promise<void> {
-  try {
-    await axios.post(
-      `${API_BASE_URL}/api/session/${sessionId}/reset`,
-      {},
-      { timeout: 5000 }
+    console.error("[COMPARE ERROR]", error);
+    throw new Error(
+      error.response?.data?.error ||
+        error.response?.data?.details ||
+        "Ошибка при сравнении моделей"
     );
-
-    console.log("[SESSION RESET]", sessionId);
-  } catch (error: any) {
-    console.error("[RESET SESSION ERROR]", error);
-
-    if (error.response?.status === 404) {
-      throw new Error("Сессия не найдена");
-    }
-
-    throw new Error("Не удалось сбросить сессию");
   }
 }
 
-// Health check с информацией о сессиях
+// Health check
 export async function checkHealth(): Promise<{
   status: string;
-  activeSessions: number;
+  timestamp: string;
 }> {
   try {
     const response = await axios.get(`${API_BASE_URL}/api/health`, {

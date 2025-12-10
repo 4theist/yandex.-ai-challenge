@@ -1,9 +1,9 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { YandexGPTService, Message, AgentResponse } from "./yandexService";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { MODELS_CONFIG } from "./config/models";
+import { callModel, ModelResult } from "./utils/modelCaller";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -16,209 +16,119 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json());
 
-const yandexService = new YandexGPTService();
-
-// In-memory хранилище сессий
-interface Session {
-  sessionId: string;
-  messages: Message[];
-  createdAt: Date;
-  lastActivityAt: Date;
-  isComplete: boolean;
-}
-
-const sessions = new Map<string, Session>();
-
-//  Очистка старых сессий (старше 1 часа)
-setInterval(() => {
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
-  for (const [sessionId, session] of sessions.entries()) {
-    if (session.lastActivityAt.getTime() < oneHourAgo) {
-      console.log(`[CLEANUP] Removing session ${sessionId}`);
-      sessions.delete(sessionId);
-    }
-  }
-}, 15 * 60 * 1000);
-
-//  эндпоинт для создания сессии
-app.post("/api/session/create", (req, res) => {
-  const sessionId = uuidv4();
-
-  sessions.set(sessionId, {
-    sessionId,
-    messages: [],
-    createdAt: new Date(),
-    lastActivityAt: new Date(),
-    isComplete: false,
-  });
-
-  console.log(`[SESSION CREATED] ${sessionId}`);
-
-  res.json({
-    sessionId,
-    message: "Session created successfully",
-  });
+// Список доступных моделей
+app.get("/api/models", (req, res) => {
+  res.json(MODELS_CONFIG);
 });
 
-//  эндпоинт для чата с историей
+// Single mode - одна модель
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, sessionId } = req.body;
+    const { message, temperature, provider, model } = req.body;
 
     // Валидация
     if (!message || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
-        error: "Сообщение обязательно и должно быть непустой строкой",
+        error: "message обязателен и должен быть непустой строкой",
       });
     }
 
-    if (!sessionId || typeof sessionId !== "string") {
+    if (!provider || !["yandex", "openrouter"].includes(provider)) {
       return res.status(400).json({
-        error:
-          "sessionId обязателен. Создайте сессию через POST /api/session/create",
+        error: "provider должен быть 'yandex' или 'openrouter'",
       });
     }
 
-    // Получаем или создаем сессию
-    let session = sessions.get(sessionId);
-
-    if (!session) {
-      // Если сессия не найдена - создаем новую (fallback)
-      console.log(`[SESSION NOT FOUND] Creating new session ${sessionId}`);
-      session = {
-        sessionId,
-        messages: [],
-        createdAt: new Date(),
-        lastActivityAt: new Date(),
-        isComplete: false,
-      };
-      sessions.set(sessionId, session);
+    if (!model || typeof model !== "string") {
+      return res.status(400).json({
+        error: "model обязателен",
+      });
     }
 
-    // Проверяем, не завершен ли диалог
-    if (session.isComplete) {
-      return res.json({
-        status: "ready",
-        reasoning: "Диалог уже завершен. Создайте новую сессию.",
-        result: { message: "Создайте новую сессию для нового запроса" },
-        confidence: 100,
-      } as AgentResponse);
-    }
+    const temp = temperature !== undefined ? temperature : 0.6;
 
     console.log(
-      `[REQUEST] Session: ${sessionId}, Message: "${message.substring(
-        0,
-        100
-      )}..."`
+      `[CHAT] ${provider}/${model} - "${message.substring(0, 50)}..."`
     );
-    console.log(`[HISTORY] Current messages count: ${session.messages.length}`);
 
-    // Добавляем новое сообщение пользователя в историю
-    session.messages.push({
-      role: "user",
-      text: message,
-    });
-
-    //  Отправляем ВСЮ историю в YandexGPT
-    const response = await yandexService.getAgentResponse(session.messages, 3);
-
-    //  Сохраняем ответ ассистента в историю
-    session.messages.push({
-      role: "assistant",
-      text: JSON.stringify(response),
-    });
-
-    //  Обновляем метаданные сессии
-    session.lastActivityAt = new Date();
-
-    //  Если статус "ready" - помечаем диалог завершенным
-    if (response.status === "ready") {
-      session.isComplete = true;
-      console.log(`[SESSION COMPLETED] ${sessionId}`);
-    }
+    const result = await callModel(provider, model, message, temp);
 
     console.log(
-      `[RESPONSE] Status: ${response.status}, Confidence: ${response.confidence}`
+      `[CHAT SUCCESS] ${result.metrics.latencyMs}ms, ${result.metrics.totalTokens} tokens`
     );
 
-    res.json(response);
+    res.json(result);
   } catch (error: any) {
-    console.error("[ERROR] Chat endpoint:", error);
+    console.error("[CHAT ERROR]", error);
     res.status(500).json({
-      error: "Внутренняя ошибка сервера",
+      error: "Не удалось получить ответ",
       details: error.message,
     });
   }
 });
 
-// эндпоинт для получения истории сессии
-app.get("/api/session/:sessionId/history", (req, res) => {
-  const { sessionId } = req.params;
-  const session = sessions.get(sessionId);
+// Compare mode - две модели параллельно
+app.post("/api/compare", async (req, res) => {
+  try {
+    const { message, temperature, model1, model2 } = req.body;
 
-  if (!session) {
-    return res.status(404).json({
-      error: "Session not found",
+    // Валидация
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({
+        error: "message обязателен и должен быть непустой строкой",
+      });
+    }
+
+    if (!model1 || !model1.provider || !model1.model) {
+      return res.status(400).json({
+        error: "model1 должен содержать provider и model",
+      });
+    }
+
+    if (!model2 || !model2.provider || !model2.model) {
+      return res.status(400).json({
+        error: "model2 должен содержать provider и model",
+      });
+    }
+
+    const temp = temperature !== undefined ? temperature : 0.6;
+
+    console.log(
+      `[COMPARE] ${model1.provider}/${model1.model} vs ${model2.provider}/${model2.model}`
+    );
+
+    // Параллельный вызов обеих моделей
+    const [result1, result2] = await Promise.all([
+      callModel(model1.provider, model1.model, message, temp),
+      callModel(model2.provider, model2.model, message, temp),
+    ]);
+
+    console.log(
+      `[COMPARE SUCCESS] Model1: ${result1.metrics.latencyMs}ms, Model2: ${result2.metrics.latencyMs}ms`
+    );
+
+    res.json({
+      results: [result1, result2],
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error("[COMPARE ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось сравнить модели",
+      details: error.message,
     });
   }
-
-  // Форматируем историю для отображения
-  const history = session.messages
-    .filter((m) => m.role !== "system")
-    .map((m) => {
-      if (m.role === "assistant") {
-        try {
-          const parsed = JSON.parse(m.text) as AgentResponse;
-          return {
-            role: "assistant",
-            status: parsed.status,
-            content: parsed.question || JSON.stringify(parsed.result, null, 2),
-            confidence: parsed.confidence,
-            reasoning: parsed.reasoning,
-          };
-        } catch {
-          return { role: "assistant", content: m.text };
-        }
-      }
-      return { role: m.role, content: m.text };
-    });
-
-  res.json({
-    sessionId,
-    isComplete: session.isComplete,
-    messageCount: history.length,
-    history,
-  });
 });
 
-//  эндпоинт для сброса сессии
-app.post("/api/session/:sessionId/reset", (req, res) => {
-  const { sessionId } = req.params;
-
-  if (!sessions.has(sessionId)) {
-    return res.status(404).json({
-      error: "Session not found",
-    });
-  }
-
-  sessions.delete(sessionId);
-  console.log(`[SESSION RESET] ${sessionId}`);
-
-  res.json({
-    message: "Session reset successfully",
-    sessionId,
-  });
-});
-
-//  Health check с информацией о сессиях
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
     timestamp: new Date().toISOString(),
-    service: "yandex-gpt-agent",
-    activeSessions: sessions.size,
+    service: "ai-models-comparison",
   });
 });
 
@@ -227,10 +137,9 @@ app.use((req, res) => {
   res.status(404).json({
     error: "Endpoint not found",
     availableEndpoints: [
-      "POST /api/session/create - Создать новую сессию",
-      "POST /api/chat - Отправить сообщение (требует sessionId)",
-      "GET /api/session/:sessionId/history - Получить историю",
-      "POST /api/session/:sessionId/reset - Сбросить сессию",
+      "GET /api/models - Получить список моделей",
+      "POST /api/chat - Отправить сообщение одной модели",
+      "POST /api/compare - Сравнить две модели",
       "GET /api/health - Проверка здоровья",
     ],
   });
@@ -255,10 +164,9 @@ app.use(
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
   console.log(`📡 Endpoints:`);
-  console.log(`   POST http://localhost:${PORT}/api/session/create`);
+  console.log(`   GET  http://localhost:${PORT}/api/models`);
   console.log(`   POST http://localhost:${PORT}/api/chat`);
-  console.log(`   GET  http://localhost:${PORT}/api/session/:id/history`);
-  console.log(`   POST http://localhost:${PORT}/api/session/:id/reset`);
+  console.log(`   POST http://localhost:${PORT}/api/compare`);
   console.log(`   GET  http://localhost:${PORT}/api/health`);
 });
 

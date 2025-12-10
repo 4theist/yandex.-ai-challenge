@@ -1,87 +1,28 @@
-// ========================================
-// Базовые интерфейсы для сообщений
-// ========================================
-
-export interface Message {
-  role: "user" | "assistant" | "system";
-  text: string;
-}
-
-// ========================================
-//  структура ответа агента-сборщика
-// ========================================
-
-export interface AgentResponse {
-  status: "collecting" | "ready";
-  reasoning: string;
-  missingInfo: string[];
-  question: string;
-  result: any;
-  confidence: number;
-  temperature?: number;
-}
-
-// ========================================
-// Интерфейс для отображения сообщений в UI
-// ========================================
-
-export interface DisplayMessage {
+export interface ModelConfig {
   id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  temperature?: number;
-  agentResponse?: AgentResponse; // Полный ответ агента для рендеринга
+  name: string;
 }
 
-// ========================================
-// Состояние диалога (опционально, для удобства)
-// ========================================
-
-export interface ConversationState {
-  sessionId: string | null;
-  messages: DisplayMessage[];
-  isLoading: boolean;
-  isComplete: boolean;
-  error: string | null;
-  currentTemperature: number;
+export interface ModelsConfig {
+  yandex: ModelConfig[];
+  openrouter: ModelConfig[];
 }
 
-// ========================================
-// Ответы API эндпоинтов
-// ========================================
-
-export interface CreateSessionResponse {
-  sessionId: string;
-  message: string;
+export interface ModelResult {
+  provider: string;
+  model: string;
+  text: string;
+  metrics: {
+    latencyMs: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cost: number;
+    currency: "₽" | "FREE";
+  };
 }
 
-export interface SessionHistoryResponse {
-  sessionId: string;
-  isComplete: boolean;
-  messageCount: number;
-  history: Array<{
-    role: string;
-    content: string;
-    status?: string;
-    confidence?: number;
-    reasoning?: string;
-    temperature?: number;
-  }>;
-}
-
-export interface HealthCheckResponse {
-  status: string;
+export interface CompareResponse {
+  results: [ModelResult, ModelResult];
   timestamp: string;
-  service: string;
-  activeSessions: number;
-}
-
-// ========================================
-// Типы ошибок
-// ========================================
-
-export interface APIError {
-  error: string;
-  details?: string;
 }
