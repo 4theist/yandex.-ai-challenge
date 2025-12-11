@@ -1,6 +1,8 @@
 export interface ModelConfig {
   id: string;
   name: string;
+  contextLimit: number;
+  outputLimit?: number;
 }
 
 export interface ModelsConfig {
@@ -19,7 +21,13 @@ export interface ModelResult {
     totalTokens: number;
     cost: number;
     currency: "₽" | "FREE";
+    contextLimit: number;
+    outputLimit: number;
+    contextUsagePercent: number;
+    outputUsagePercent: number;
   };
+  warning?: string;
+  error?: string;
 }
 
 export interface CompareResponse {

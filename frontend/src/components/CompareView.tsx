@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ModelsConfig, ModelResult } from "../types";
 import { getModels, compareModels } from "../api";
+import { TokenUsageBar } from "./TokenUsageBar";
 
 export const CompareView: React.FC = () => {
   const [models, setModels] = useState<ModelsConfig | null>(null);
@@ -70,6 +71,23 @@ export const CompareView: React.FC = () => {
           color: "#22c55e",
         }
       : {};
+  };
+
+  const examples = {
+    short: "Привет! Как дела?",
+    medium:
+      "Объясни простыми словами, что такое квантовая физика и почему она важна для современной науки.",
+    long: `Напиши подробную статью о развитии искусственного интеллекта с 1950-х годов до наших дней. 
+Включи информацию о ключевых вехах, таких как тест Тьюринга, первые нейронные сети, появление машинного обучения, 
+глубокое обучение, трансформеры и современные большие языковые модели. Опиши основные достижения и проблемы на каждом этапе. 
+Также расскажи о влиянии ИИ на различные отрасли: медицину, транспорт, финансы, образование и творчество. 
+Обсуди этические вопросы и будущее развития ИИ. Приведи примеры конкретных систем и их применения.`.repeat(
+      3
+    ),
+  };
+
+  const handleExampleClick = (text: string) => {
+    setMessage(text);
   };
 
   return (
@@ -153,6 +171,34 @@ export const CompareView: React.FC = () => {
         </div>
       </div>
 
+      {/* Examples */}
+      <div style={styles.examplesSection}>
+        <div style={styles.examplesTitle}>📝 Примеры для тестирования:</div>
+        <div style={styles.examplesGrid}>
+          <button
+            onClick={() => handleExampleClick(examples.short)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Короткий
+          </button>
+          <button
+            onClick={() => handleExampleClick(examples.medium)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Средний
+          </button>
+          <button
+            onClick={() => handleExampleClick(examples.long)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Длинный (тест лимита)
+          </button>
+        </div>
+      </div>
+
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
@@ -176,21 +222,56 @@ export const CompareView: React.FC = () => {
           {/* Responses side-by-side */}
           <div className="fade-in">
             <div style={styles.responsesRow}>
-              <div style={styles.responseCard}>
-                <h3 style={styles.responseTitle}>
-                  {results[0].provider === "yandex" ? "🟣" : "🔵"}{" "}
-                  {results[0].model}
-                </h3>
-                <div style={styles.responseText}>{results[0].text}</div>
-              </div>
+              {results.map((result, index) => (
+                <div
+                  key={index}
+                  style={styles.responseCard}
+                  className="fade-in"
+                >
+                  <h3 style={styles.responseTitle}>
+                    {result.provider === "yandex" ? "🟣" : "🔵"} {result.model}
+                  </h3>
 
-              <div style={styles.responseCard}>
-                <h3 style={styles.responseTitle}>
-                  {results[1].provider === "yandex" ? "🟣" : "🔵"}{" "}
-                  {results[1].model}
-                </h3>
-                <div style={styles.responseText}>{results[1].text}</div>
-              </div>
+                  {/* Error display */}
+                  {result.error && (
+                    <div style={styles.errorBox}>
+                      <span style={styles.errorIcon}>⚠️</span>
+                      <span>{result.error}</span>
+                    </div>
+                  )}
+
+                  {/* Warning display */}
+                  {result.warning && !result.error && (
+                    <div style={styles.warningBox}>
+                      <span style={styles.warningIcon}>⚡</span>
+                      <span>{result.warning}</span>
+                    </div>
+                  )}
+
+                  {!result.error && (
+                    <>
+                      <div style={styles.responseText}>{result.text}</div>
+
+                      {/* Token usage */}
+                      <div style={styles.tokenSection}>
+                        <h4 style={styles.sectionTitle}>Токены</h4>
+                        <TokenUsageBar
+                          label="Prompt"
+                          used={result.metrics.promptTokens}
+                          limit={result.metrics.contextLimit}
+                          percent={result.metrics.contextUsagePercent}
+                        />
+                        <TokenUsageBar
+                          label="Completion"
+                          used={result.metrics.completionTokens}
+                          limit={result.metrics.outputLimit}
+                          percent={result.metrics.outputUsagePercent}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Metrics comparison table */}
@@ -459,5 +540,77 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "13px",
     color: "#e4e4e7",
     fontFamily: "monospace",
+  },
+  errorBox: {
+    padding: "12px",
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    border: "1px solid rgba(239, 68, 68, 0.3)",
+    borderRadius: "8px",
+    color: "#fca5a5",
+    fontSize: "12px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "12px",
+  },
+  errorIcon: {
+    fontSize: "16px",
+  },
+  warningBox: {
+    padding: "12px",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    border: "1px solid rgba(245, 158, 11, 0.3)",
+    borderRadius: "8px",
+    color: "#fcd34d",
+    fontSize: "12px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "12px",
+  },
+  warningIcon: {
+    fontSize: "16px",
+  },
+  tokenSection: {
+    padding: "12px",
+    backgroundColor: "#0a0a0a",
+    borderRadius: "8px",
+    border: "1px solid #27272a",
+    marginTop: "12px",
+  },
+  sectionTitle: {
+    margin: "0 0 10px 0",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#fafafa",
+  },
+  examplesSection: {
+    marginBottom: "12px",
+    padding: "12px",
+    backgroundColor: "#18181b",
+    borderRadius: "10px",
+    border: "1px solid #27272a",
+  },
+  examplesTitle: {
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#a1a1aa",
+    marginBottom: "8px",
+  },
+  examplesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "8px",
+  },
+  exampleButton: {
+    padding: "8px 12px",
+    backgroundColor: "#27272a",
+    color: "#fafafa",
+    border: "1px solid #3f3f46",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "500",
+    cursor: "pointer",
+    transition: "all 0.2s",
   },
 };

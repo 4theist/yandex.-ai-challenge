@@ -46,6 +46,7 @@ export class OpenRouterService {
           model: model,
           messages: [{ role: "user", content: message }],
           temperature: temperature,
+          route: "fallback",
         },
         {
           headers: {

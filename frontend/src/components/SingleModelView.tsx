@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ModelsConfig, ModelResult } from "../types";
 import { getModels, sendToModel } from "../api";
+import { TokenUsageBar } from "./TokenUsageBar";
 
 export const SingleModelView: React.FC = () => {
   const [models, setModels] = useState<ModelsConfig | null>(null);
@@ -47,6 +48,22 @@ export const SingleModelView: React.FC = () => {
     }
   };
 
+  const examples = {
+    short: "Привет! Как дела?",
+    medium:
+      "Объясни простыми словами, что такое квантовая физика и почему она важна для современной науки.",
+    long: `Напиши подробную статью о развитии искусственного интеллекта с 1950-х годов до наших дней. 
+Включи информацию о ключевых вехах, таких как тест Тьюринга, первые нейронные сети, появление машинного обучения, 
+глубокое обучение, трансформеры и современные большие языковые модели. Опиши основные достижения и проблемы на каждом этапе. 
+Также расскажи о влиянии ИИ на различные отрасли: медицину, транспорт, финансы, образование и творчество. 
+Обсуди этические вопросы и будущее развития ИИ. Приведи примеры конкретных систем и их применения.`.repeat(
+      3
+    ),
+  };
+
+  const handleExampleClick = (text: string) => {
+    setMessage(text);
+  };
   return (
     <div style={styles.container}>
       {/* Model selection */}
@@ -114,6 +131,34 @@ export const SingleModelView: React.FC = () => {
         disabled={isLoading}
       />
 
+      {/* Examples */}
+      <div style={styles.examplesSection}>
+        <div style={styles.examplesTitle}>📝 Примеры для тестирования:</div>
+        <div style={styles.examplesGrid}>
+          <button
+            onClick={() => handleExampleClick(examples.short)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Короткий (~10 токенов)
+          </button>
+          <button
+            onClick={() => handleExampleClick(examples.medium)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Средний (~50 токенов)
+          </button>
+          <button
+            onClick={() => handleExampleClick(examples.long)}
+            style={styles.exampleButton}
+            type="button"
+          >
+            Длинный (~2000+ токенов)
+          </button>
+        </div>
+      </div>
+
       <button
         onClick={handleSend}
         disabled={isLoading || !selectedModel}
@@ -125,35 +170,72 @@ export const SingleModelView: React.FC = () => {
       {/* Result */}
       {result && (
         <div className="fade-in" style={styles.result}>
-          <div style={styles.resultHeader}>
-            <h3 style={styles.modelName}>
-              {result.provider === "yandex" ? "🟣" : "🔵"} {result.model}
-            </h3>
-          </div>
+          {/* Error display */}
+          {result.error && (
+            <div style={styles.errorBox}>
+              <span style={styles.errorIcon}>⚠️</span>
+              <span>{result.error}</span>
+            </div>
+          )}
 
-          <div style={styles.responseText}>{result.text}</div>
+          {/* Warning display */}
+          {result.warning && !result.error && (
+            <div style={styles.warningBox}>
+              <span style={styles.warningIcon}>⚡</span>
+              <span>{result.warning}</span>
+            </div>
+          )}
 
-          <div style={styles.metrics}>
-            <div style={styles.metricItem}>
-              <span style={styles.metricLabel}>⏱️ Время:</span>
-              <span style={styles.metricValue}>
-                {result.metrics.latencyMs} мс
-              </span>
-            </div>
-            <div style={styles.metricItem}>
-              <span style={styles.metricLabel}>📊 Токены:</span>
-              <span style={styles.metricValue}>
-                {result.metrics.promptTokens} +{" "}
-                {result.metrics.completionTokens} = {result.metrics.totalTokens}
-              </span>
-            </div>
-            <div style={styles.metricItem}>
-              <span style={styles.metricLabel}>💰 Стоимость:</span>
-              <span style={styles.metricValue}>
-                {result.metrics.cost} {result.metrics.currency}
-              </span>
-            </div>
-          </div>
+          {!result.error && (
+            <>
+              <div style={styles.resultHeader}>
+                <h3 style={styles.modelName}>
+                  {result.provider === "yandex" ? "🟣" : "🔵"} {result.model}
+                </h3>
+              </div>
+
+              <div style={styles.responseText}>{result.text}</div>
+
+              {/* Token usage visualization */}
+              <div style={styles.tokenSection}>
+                <h4 style={styles.sectionTitle}>📊 Использование токенов</h4>
+                <TokenUsageBar
+                  label="Prompt (запрос)"
+                  used={result.metrics.promptTokens}
+                  limit={result.metrics.contextLimit}
+                  percent={result.metrics.contextUsagePercent}
+                />
+                <TokenUsageBar
+                  label="Completion (ответ)"
+                  used={result.metrics.completionTokens}
+                  limit={result.metrics.outputLimit}
+                  percent={result.metrics.outputUsagePercent}
+                />
+              </div>
+
+              {/* Metrics */}
+              <div style={styles.metrics}>
+                <div style={styles.metricItem}>
+                  <span style={styles.metricLabel}>⏱️ Время:</span>
+                  <span style={styles.metricValue}>
+                    {result.metrics.latencyMs} мс
+                  </span>
+                </div>
+                <div style={styles.metricItem}>
+                  <span style={styles.metricLabel}>📊 Всего токенов:</span>
+                  <span style={styles.metricValue}>
+                    {result.metrics.totalTokens}
+                  </span>
+                </div>
+                <div style={styles.metricItem}>
+                  <span style={styles.metricLabel}>💰 Стоимость:</span>
+                  <span style={styles.metricValue}>
+                    {result.metrics.cost} {result.metrics.currency}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -314,5 +396,77 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: "600",
     color: "#fafafa",
     fontFamily: "monospace",
+  },
+  errorBox: {
+    padding: "12px 16px",
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    border: "1px solid rgba(239, 68, 68, 0.3)",
+    borderRadius: "8px",
+    color: "#fca5a5",
+    fontSize: "13px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "16px",
+  },
+  errorIcon: {
+    fontSize: "18px",
+  },
+  warningBox: {
+    padding: "12px 16px",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    border: "1px solid rgba(245, 158, 11, 0.3)",
+    borderRadius: "8px",
+    color: "#fcd34d",
+    fontSize: "13px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "16px",
+  },
+  warningIcon: {
+    fontSize: "18px",
+  },
+  tokenSection: {
+    padding: "16px",
+    backgroundColor: "#0a0a0a",
+    borderRadius: "8px",
+    border: "1px solid #27272a",
+    marginBottom: "16px",
+  },
+  sectionTitle: {
+    margin: "0 0 12px 0",
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#fafafa",
+  },
+  examplesSection: {
+    marginBottom: "12px",
+    padding: "12px",
+    backgroundColor: "#18181b",
+    borderRadius: "10px",
+    border: "1px solid #27272a",
+  },
+  examplesTitle: {
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#a1a1aa",
+    marginBottom: "8px",
+  },
+  examplesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "8px",
+  },
+  exampleButton: {
+    padding: "8px 12px",
+    backgroundColor: "#27272a",
+    color: "#fafafa",
+    border: "1px solid #3f3f46",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "500",
+    cursor: "pointer",
+    transition: "all 0.2s",
   },
 };
