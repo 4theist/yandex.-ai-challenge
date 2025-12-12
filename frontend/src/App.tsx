@@ -2,9 +2,11 @@ import React, { useState, useEffect } from "react";
 import { checkHealth } from "./api";
 import { SingleModelView } from "./components/SingleModelView";
 import { CompareView } from "./components/CompareView";
+import { DialogView } from "./components/DialogView";
 
 function App() {
-  const [mode, setMode] = useState<"single" | "compare">("single");
+  const [mode, setMode] = useState<"single" | "compare" | "dialog">("single");
+
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -22,7 +24,7 @@ function App() {
             <h1 style={styles.title}>🤖 AI Models Comparison</h1>
           </div>
 
-          {/* Center: Mode switcher */}
+          {/* Mode switcher */}
           <div style={styles.modeSwitcher}>
             <label
               style={{
@@ -60,6 +62,24 @@ function App() {
               />
               <span>Сравнение</span>
             </label>
+            <label
+              style={{
+                ...styles.modeLabel,
+                ...(mode === "dialog" && {
+                  backgroundColor: "rgba(255, 255, 255, 0.25)",
+                  fontWeight: "600",
+                }),
+              }}
+            >
+              <input
+                type="radio"
+                value="dialog"
+                checked={mode === "dialog"}
+                onChange={() => setMode("dialog")}
+                style={styles.radio}
+              />
+              <span>Диалог</span>
+            </label>
           </div>
 
           {/* Right: Health indicator */}
@@ -80,7 +100,13 @@ function App() {
       </header>
 
       <main style={styles.main}>
-        {mode === "single" ? <SingleModelView /> : <CompareView />}
+        {mode === "single" ? (
+          <SingleModelView />
+        ) : mode === "compare" ? (
+          <CompareView />
+        ) : (
+          <DialogView />
+        )}
       </main>
     </div>
   );

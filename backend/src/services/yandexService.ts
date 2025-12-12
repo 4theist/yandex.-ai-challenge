@@ -52,12 +52,19 @@ export class YandexGPTService {
   }
 
   /**
-   * Простая отправка сообщения с выбором модели
+   * Отправка сообщения с полным контролем параметров
+   * @param model - ID модели ('yandexgpt' | 'yandexgpt-lite')
+   * @param message - Сообщение пользователя или массив сообщений для диалога
+   * @param temperature - Температура генерации (0-1.2)
+   * @param systemPrompt - Системный промпт (опционально)
+   * @param maxTokens - Максимум токенов в ответе (по умолчанию 2000)
    */
   async sendMessage(
     model: "yandexgpt" | "yandexgpt-lite",
-    message: string,
-    temperature: number
+    message: string | Message[],
+    temperature: number = 0.6,
+    systemPrompt?: string,
+    maxTokens: number = 2000
   ): Promise<{
     text: string;
     promptTokens: number;
@@ -69,20 +76,58 @@ export class YandexGPTService {
     const modelUri = `gpt://${this.folderId}/${model}/latest`;
     const startTime = Date.now();
 
+    // Формируем массив сообщений
+    let messages: Message[];
+
+    if (typeof message === "string") {
+      // Простое сообщение - конвертируем в массив
+      messages = [];
+
+      // Добавляем system prompt если передан
+      if (systemPrompt) {
+        messages.push({
+          role: "system",
+          text: systemPrompt,
+        });
+      }
+
+      // Добавляем сообщение пользователя
+      messages.push({
+        role: "user",
+        text: message,
+      });
+    } else {
+      // Уже массив сообщений (для диалогов)
+      messages = [...message];
+
+      // Добавляем system prompt в начало если передан и его там нет
+      if (systemPrompt) {
+        const hasSystemPrompt = messages.some((m) => m.role === "system");
+        if (!hasSystemPrompt) {
+          messages.unshift({
+            role: "system",
+            text: systemPrompt,
+          });
+        }
+      }
+    }
+
     const requestBody: YandexRequest = {
       modelUri: modelUri,
       completionOptions: {
         stream: false,
         temperature: temperature,
-        maxTokens: 2000,
+        maxTokens: maxTokens,
       },
-      messages: [
-        {
-          role: "user",
-          text: message,
-        },
-      ],
+      messages,
     };
+
+    console.log(`[YANDEX] Calling ${model}`, {
+      temperature,
+      maxTokens,
+      messagesCount: messages.length,
+      hasSystemPrompt: messages.some((m) => m.role === "system"),
+    });
 
     try {
       const response = await axios.post<YandexResponse>(
@@ -102,6 +147,12 @@ export class YandexGPTService {
 
       const text = response.data.result.alternatives[0]?.message?.text || "";
       const usage = response.data.result.usage;
+
+      console.log(`[YANDEX SUCCESS]`, {
+        model,
+        latencyMs,
+        tokens: usage.totalTokens,
+      });
 
       return {
         text,
@@ -124,5 +175,29 @@ export class YandexGPTService {
         }`
       );
     }
+  }
+
+  /**
+   * Отправка диалога с контекстом (для continuous диалогов)
+   * @param model - ID модели
+   * @param messages - Массив сообщений диалога
+   * @param temperature - Температура
+   * @param systemPrompt - Системный промпт (опционально)
+   * @param maxTokens - Максимум токенов
+   */
+  async sendDialog(
+    model: "yandexgpt" | "yandexgpt-lite",
+    messages: Message[],
+    temperature: number = 0.6,
+    systemPrompt?: string,
+    maxTokens: number = 2000
+  ) {
+    return this.sendMessage(
+      model,
+      messages,
+      temperature,
+      systemPrompt,
+      maxTokens
+    );
   }
 }

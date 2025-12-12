@@ -1,5 +1,11 @@
-import { YandexGPTService } from "../services/yandexService";
-import { OpenRouterService } from "../services/openRouterService";
+import {
+  YandexGPTService,
+  Message as YandexMessage,
+} from "../services/yandexService";
+import {
+  OpenRouterService,
+  Message as OpenRouterMessage,
+} from "../services/openRouterService";
 import { calculateCost } from "./pricing";
 import { getModelInfo } from "../config/models";
 
@@ -18,6 +24,14 @@ function getOpenRouterService() {
     openRouterService = new OpenRouterService();
   }
   return openRouterService;
+}
+
+export interface ModelCallOptions {
+  systemPrompt?: string;
+  maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
 }
 
 export interface ModelResult {
@@ -40,30 +54,78 @@ export interface ModelResult {
   error?: string;
 }
 
+/**
+ * Вызов модели с полным контролем параметров
+ * @param provider - Провайдер (yandex | openrouter)
+ * @param model - ID модели
+ * @param message - Сообщение или массив сообщений для диалога
+ * @param temperature - Температура генерации
+ * @param options - Дополнительные опции (systemPrompt, maxTokens и т.д.)
+ */
 export async function callModel(
   provider: "yandex" | "openrouter",
   model: string,
-  message: string,
-  temperature: number
+  message: string | any[],
+  temperature: number,
+  options?: ModelCallOptions
 ): Promise<ModelResult> {
   const modelInfo = getModelInfo(provider, model);
   const contextLimit = modelInfo?.contextLimit || 8000;
   const outputLimit = modelInfo?.outputLimit || 2000;
 
+  console.log(`[MODEL CALLER] ${provider}/${model}`, {
+    temperature,
+    hasSystemPrompt: !!options?.systemPrompt,
+    maxTokens: options?.maxTokens,
+  });
+
   try {
     let result;
 
     if (provider === "yandex") {
+      // Конвертируем сообщения в формат Yandex если это массив
+      let yandexMessage: string | YandexMessage[];
+
+      if (typeof message === "string") {
+        yandexMessage = message;
+      } else {
+        // Конвертируем OpenRouter формат в Yandex формат
+        yandexMessage = message.map((msg: any) => ({
+          role: msg.role,
+          text: msg.content || msg.text,
+        }));
+      }
+
       result = await getYandexService().sendMessage(
         model as "yandexgpt" | "yandexgpt-lite",
-        message,
-        temperature
+        yandexMessage,
+        temperature,
+        options?.systemPrompt,
+        options?.maxTokens
       );
     } else {
+      // OpenRouter
+      let openRouterMessage: string | OpenRouterMessage[];
+
+      if (typeof message === "string") {
+        openRouterMessage = message;
+      } else {
+        // Конвертируем Yandex формат в OpenRouter формат
+        openRouterMessage = message.map((msg: any) => ({
+          role: msg.role,
+          content: msg.text || msg.content,
+        }));
+      }
+
       result = await getOpenRouterService().sendMessage(
         model,
-        message,
-        temperature
+        openRouterMessage,
+        temperature,
+        options?.systemPrompt,
+        options?.maxTokens,
+        options?.topP,
+        options?.frequencyPenalty,
+        options?.presencePenalty
       );
     }
 
@@ -89,6 +151,13 @@ export async function callModel(
       warning = `Использовано ${outputUsagePercent}% лимита ответа (${result.completionTokens}/${outputLimit} токенов)`;
     }
 
+    console.log(`[MODEL CALLER SUCCESS]`, {
+      provider,
+      model,
+      tokens: result.totalTokens,
+      cost: `${cost} ${currency}`,
+    });
+
     return {
       provider,
       model,
@@ -108,7 +177,7 @@ export async function callModel(
       warning,
     };
   } catch (error: any) {
-    console.error(`[${provider}/${model} ERROR]`, error.message);
+    console.error(`[MODEL CALLER ERROR] ${provider}/${model}:`, error.message);
 
     // Определяем тип ошибки
     let errorMessage = error.message;
@@ -130,7 +199,7 @@ export async function callModel(
         completionTokens: 0,
         totalTokens: 0,
         cost: 0,
-        currency: "FREE",
+        currency: provider === "yandex" ? "₽" : "FREE",
         contextLimit,
         outputLimit,
         contextUsagePercent: 0,
@@ -139,4 +208,22 @@ export async function callModel(
       error: errorMessage,
     };
   }
+}
+
+/**
+ * Вызов модели для диалога (с массивом сообщений)
+ * @param provider - Провайдер
+ * @param model - ID модели
+ * @param messages - Массив сообщений диалога
+ * @param temperature - Температура
+ * @param options - Дополнительные опции
+ */
+export async function callModelDialog(
+  provider: "yandex" | "openrouter",
+  model: string,
+  messages: any[],
+  temperature: number,
+  options?: ModelCallOptions
+): Promise<ModelResult> {
+  return callModel(provider, model, messages, temperature, options);
 }

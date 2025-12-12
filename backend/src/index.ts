@@ -3,7 +3,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { MODELS_CONFIG } from "./config/models";
-import { callModel, ModelResult } from "./utils/modelCaller";
+import { callModel, ModelCallOptions, ModelResult } from "./utils/modelCaller";
+import { SessionConfig, sessionManager } from "./services/sessionManager";
+import { compressionService } from "./services/compressionService";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -123,6 +125,231 @@ app.post("/api/compare", async (req, res) => {
   }
 });
 
+// Global error handler
+app.use(
+  (
+    err: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    console.error("[GLOBAL ERROR]", err);
+    res.status(500).json({
+      error: "Внутренняя ошибка сервера",
+      details: err.message,
+    });
+  }
+);
+// ============================================
+// DIALOG API
+// ============================================
+
+app.post("/api/dialog/create", (req, res) => {
+  try {
+    console.log("[CREATE DIALOG] Request body:", req.body);
+
+    const { provider, model, temperature, config } = req.body;
+
+    if (!provider || !model) {
+      return res.status(400).json({
+        error: "provider и model обязательны",
+      });
+    }
+
+    const sessionConfig: SessionConfig = {
+      compressionEnabled: config?.compressionEnabled ?? true,
+      compressionThreshold: config?.compressionThreshold ?? 10,
+      summaryProvider: config?.summaryProvider || provider,
+      summaryModel: config?.summaryModel || model,
+    };
+
+    const sessionId = sessionManager.createSession(
+      provider,
+      model,
+      temperature ?? 0.6,
+      sessionConfig
+    );
+
+    console.log("[CREATE DIALOG] Session created:", sessionId);
+
+    res.json({
+      sessionId,
+      config: sessionConfig,
+      message: "Сессия создана успешно",
+    });
+  } catch (error: any) {
+    console.error("[CREATE DIALOG ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось создать сессию",
+      details: error.message,
+    });
+  }
+});
+
+app.post("/api/dialog/message", async (req, res) => {
+  try {
+    const { sessionId, message, options } = req.body;
+
+    if (!sessionId || !message) {
+      return res.status(400).json({
+        error: "sessionId и message обязательны",
+      });
+    }
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        error: "Сессия не найдена",
+      });
+    }
+
+    sessionManager.addMessage(sessionId, {
+      role: "user",
+      content: message,
+      timestamp: new Date(),
+      tokens: Math.ceil(message.length / 4),
+    });
+
+    let compressionTriggered = false;
+    if (sessionManager.needsCompression(sessionId)) {
+      console.log(`[DIALOG ${sessionId}] Triggering compression...`);
+
+      const summary = await compressionService.createSummary(
+        session.messages,
+        session.config.summaryProvider || session.provider,
+        session.config.summaryModel || session.model,
+        session.temperature
+      );
+
+      sessionManager.addSummary(sessionId, summary);
+      compressionTriggered = true;
+    }
+
+    const context = sessionManager.getContextForModel(sessionId);
+
+    const messages = context.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    const result = await callModel(
+      session.provider,
+      session.model,
+      messages,
+      session.temperature,
+      {
+        systemPrompt: options?.systemPrompt,
+        maxTokens: options?.maxTokens,
+        topP: options?.topP,
+        frequencyPenalty: options?.frequencyPenalty,
+        presencePenalty: options?.presencePenalty,
+      }
+    );
+
+    sessionManager.addMessage(sessionId, {
+      role: "assistant",
+      content: result.text,
+      timestamp: new Date(),
+      tokens: result.metrics.totalTokens,
+    });
+
+    const stats = sessionManager.getStats(sessionId);
+
+    res.json({
+      result,
+      stats,
+      compressionTriggered,
+      context: {
+        messagesInContext: context.length,
+        summariesCount: session.summaries.length,
+      },
+    });
+  } catch (error: any) {
+    console.error("[DIALOG MESSAGE ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось отправить сообщение",
+      details: error.message,
+    });
+  }
+});
+
+app.get("/api/dialog/:sessionId/stats", (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const stats = sessionManager.getStats(sessionId);
+
+    if (!stats) {
+      return res.status(404).json({
+        error: "Сессия не найдена",
+      });
+    }
+
+    res.json(stats);
+  } catch (error: any) {
+    console.error("[GET STATS ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось получить статистику",
+      details: error.message,
+    });
+  }
+});
+
+app.delete("/api/dialog/:sessionId", (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    sessionManager.deleteSession(sessionId);
+
+    res.json({
+      message: "Сессия удалена",
+    });
+  } catch (error: any) {
+    console.error("[DELETE SESSION ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось удалить сессию",
+      details: error.message,
+    });
+  }
+});
+
+app.post("/api/dialog/:sessionId/compress", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        error: "Сессия не найдена",
+      });
+    }
+
+    if (session.messages.length === 0) {
+      return res.status(400).json({
+        error: "Нет сообщений для сжатия",
+      });
+    }
+
+    const summary = await compressionService.createSummary(
+      session.messages,
+      session.config.summaryProvider || session.provider,
+      session.config.summaryModel || session.model,
+      session.temperature
+    );
+
+    sessionManager.addSummary(sessionId, summary);
+
+    res.json({
+      message: "Сжатие выполнено",
+      summary,
+      stats: sessionManager.getStats(sessionId),
+    });
+  } catch (error: any) {
+    console.error("[COMPRESS ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось выполнить сжатие",
+      details: error.message,
+    });
+  }
+});
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -144,29 +371,15 @@ app.use((req, res) => {
     ],
   });
 });
-
-// Global error handler
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-  ) => {
-    console.error("[GLOBAL ERROR]", err);
-    res.status(500).json({
-      error: "Внутренняя ошибка сервера",
-      details: err.message,
-    });
-  }
-);
-
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
   console.log(`📡 Endpoints:`);
   console.log(`   GET  http://localhost:${PORT}/api/models`);
   console.log(`   POST http://localhost:${PORT}/api/chat`);
   console.log(`   POST http://localhost:${PORT}/api/compare`);
+  console.log(`   POST http://localhost:${PORT}/api/dialog/create`);
+  console.log(`   POST http://localhost:${PORT}/api/dialog/message`);
+  console.log(`   DELETE http://localhost:${PORT}/api/dialog/:id`);
   console.log(`   GET  http://localhost:${PORT}/api/health`);
 });
 
