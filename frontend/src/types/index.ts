@@ -122,3 +122,41 @@ export interface CreateSessionResponse {
   config: SessionConfig;
   message: string;
 }
+
+export interface SavedSessionInfo {
+  sessionId: string;
+  provider: string;
+  model: string;
+  totalMessages: number;
+  lastActivity: string;
+  createdAt: string;
+}
+
+export interface SessionsListResponse {
+  sessions: SavedSessionInfo[];
+  total: number;
+}
+
+export interface RestoreSessionResponse {
+  message: string;
+  session: {
+    sessionId: string;
+    provider: string;
+    model: string;
+    temperature: number;
+    config: SessionConfig;
+    createdAt: string;
+    lastActivityAt: string;
+  };
+  stats: SessionStats;
+  context: {
+    messagesInContext: number;
+    summariesCount: number;
+  };
+}
+export interface SessionHistory {
+  messages: DialogMessage[];
+  summaries: DialogSummary[];
+  context: DialogMessage[];
+  totalMessages: number;
+}

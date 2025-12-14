@@ -6,6 +6,7 @@ import { MODELS_CONFIG } from "./config/models";
 import { callModel, ModelCallOptions, ModelResult } from "./utils/modelCaller";
 import { SessionConfig, sessionManager } from "./services/sessionManager";
 import { compressionService } from "./services/compressionService";
+import { persistenceService } from "./services/persistenceService";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -350,6 +351,140 @@ app.post("/api/dialog/:sessionId/compress", async (req, res) => {
     });
   }
 });
+// Получить список всех сохранённых сессий
+app.get("/api/dialog/sessions", async (req, res) => {
+  try {
+    const sessions = sessionManager.getAllSessions();
+
+    // Возвращаем базовую информацию о каждой сессии
+    const sessionsList = sessions.map((s) => ({
+      sessionId: s.sessionId,
+      provider: s.stats?.config?.summaryProvider || "unknown",
+      model: s.stats?.config?.summaryModel || "unknown",
+      totalMessages: s.stats?.totalMessages || 0,
+      lastActivity: sessionManager.getSession(s.sessionId)?.lastActivityAt,
+      createdAt: sessionManager.getSession(s.sessionId)?.createdAt,
+    }));
+
+    res.json({
+      sessions: sessionsList,
+      total: sessionsList.length,
+    });
+  } catch (error: any) {
+    console.error("[GET SESSIONS ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось получить список сессий",
+      details: error.message,
+    });
+  }
+});
+// Получить историю сообщений сессии
+app.get("/api/dialog/:sessionId/history", (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        error: "Сессия не найдена",
+      });
+    }
+
+    // Получаем полный контекст (summaries + текущие сообщения)
+    const context = sessionManager.getContextForModel(sessionId);
+
+    res.json({
+      messages: session.messages,
+      summaries: session.summaries,
+      context: context,
+      totalMessages: session.totalMessages,
+    });
+  } catch (error: any) {
+    console.error("[GET HISTORY ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось получить историю",
+      details: error.message,
+    });
+  }
+});
+
+// Восстановить сессию (проверить что она существует и загружена)
+app.post("/api/dialog/:sessionId/restore", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    let session = sessionManager.getSession(sessionId);
+
+    // Если сессия не в памяти, пытаемся загрузить из файла
+    if (!session) {
+      const loadedSession = await persistenceService.loadSession(sessionId);
+      if (!loadedSession) {
+        return res.status(404).json({
+          error: "Сессия не найдена",
+        });
+      }
+
+      // Загружаем сессию в память
+      sessionManager.restoreSession(loadedSession);
+      session = loadedSession;
+    }
+
+    const stats = sessionManager.getStats(sessionId);
+    const context = sessionManager.getContextForModel(sessionId);
+
+    res.json({
+      message: "Сессия восстановлена",
+      session: {
+        sessionId: session.sessionId,
+        provider: session.provider,
+        model: session.model,
+        temperature: session.temperature,
+        config: session.config,
+        createdAt: session.createdAt,
+        lastActivityAt: session.lastActivityAt,
+      },
+      stats,
+      context: {
+        messagesInContext: context.length,
+        summariesCount: session.summaries.length,
+      },
+    });
+  } catch (error: any) {
+    console.error("[RESTORE SESSION ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось восстановить сессию",
+      details: error.message,
+    });
+  }
+});
+// Экспортировать полную сессию в JSON
+app.get("/api/dialog/:sessionId/export", (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        error: "Сессия не найдена",
+      });
+    }
+
+    // Возвращаем полную сессию с человекочитаемым форматированием
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="session-${sessionId}-${new Date().toISOString()}.json"`
+    );
+    res.json(session);
+  } catch (error: any) {
+    console.error("[EXPORT SESSION ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось экспортировать сессию",
+      details: error.message,
+    });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -367,20 +502,32 @@ app.use((req, res) => {
       "GET /api/models - Получить список моделей",
       "POST /api/chat - Отправить сообщение одной модели",
       "POST /api/compare - Сравнить две модели",
+      "POST /api/dialog/create - Создать диалоговую сессию",
+      "POST /api/dialog/message - Отправить сообщение в диалог",
+      "GET /api/dialog/sessions - Получить список всех сессий",
+      "POST /api/dialog/:id/restore - Восстановить сессию",
+      "GET /api/dialog/:id/export - Экспортировать сессию",
+      "GET /api/dialog/:id/stats - Статистика сессии",
+      "DELETE /api/dialog/:id - Удалить сессию",
+      "POST /api/dialog/:id/compress - Сжать текущие сообщения",
       "GET /api/health - Проверка здоровья",
+      "GET /api/dialog/:id/history - Получить историю сообщений",
     ],
   });
 });
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
   console.log(`📡 Endpoints:`);
-  console.log(`   GET  http://localhost:${PORT}/api/models`);
-  console.log(`   POST http://localhost:${PORT}/api/chat`);
-  console.log(`   POST http://localhost:${PORT}/api/compare`);
-  console.log(`   POST http://localhost:${PORT}/api/dialog/create`);
-  console.log(`   POST http://localhost:${PORT}/api/dialog/message`);
-  console.log(`   DELETE http://localhost:${PORT}/api/dialog/:id`);
-  console.log(`   GET  http://localhost:${PORT}/api/health`);
+  console.log(`  GET  http://localhost:${PORT}/api/models`);
+  console.log(`  POST http://localhost:${PORT}/api/chat`);
+  console.log(`  POST http://localhost:${PORT}/api/compare`);
+  console.log(`  POST http://localhost:${PORT}/api/dialog/create`);
+  console.log(`  POST http://localhost:${PORT}/api/dialog/message`);
+  console.log(`  GET  http://localhost:${PORT}/api/dialog/sessions`);
+  console.log(`  POST http://localhost:${PORT}/api/dialog/:id/restore`);
+  console.log(`  GET  http://localhost:${PORT}/api/dialog/:id/export`);
+  console.log(`  DELETE http://localhost:${PORT}/api/dialog/:id`);
+  console.log(`  GET  http://localhost:${PORT}/api/health`);
 });
 
 export default app;

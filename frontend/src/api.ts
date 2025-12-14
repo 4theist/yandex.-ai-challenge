@@ -8,6 +8,9 @@ import {
   DialogResponse,
   SessionStats,
   DialogSummary,
+  RestoreSessionResponse,
+  SessionsListResponse,
+  SessionHistory,
 } from "./types";
 
 const API_BASE_URL = "";
@@ -277,4 +280,71 @@ export async function compressSession(
   }
 
   return response.json();
+}
+
+/**
+ * Получить список всех сохранённых сессий
+ */
+export async function getSavedSessions(): Promise<SessionsListResponse> {
+  const response = await fetch(`${API_BASE_URL}api/dialog/sessions`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get sessions");
+  }
+  return response.json();
+}
+
+/**
+ * Восстановить сессию
+ */
+export async function restoreSession(
+  sessionId: string
+): Promise<RestoreSessionResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}api/dialog/${sessionId}/restore`,
+    {
+      method: "POST",
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to restore session");
+  }
+  return response.json();
+}
+/**
+ * Получить историю сообщений сессии
+ */
+export async function getSessionHistory(
+  sessionId: string
+): Promise<SessionHistory> {
+  const response = await fetch(
+    `${API_BASE_URL}api/dialog/${sessionId}/history`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get history");
+  }
+  return response.json();
+}
+
+/**
+ * Экспортировать сессию в JSON файл
+ */
+export async function exportSession(sessionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}api/dialog/${sessionId}/export`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to export session");
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `session-${sessionId}-${new Date().toISOString()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
 }

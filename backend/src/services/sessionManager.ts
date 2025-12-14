@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { persistenceService } from "./persistenceService";
 
 export interface Message {
   role: "user" | "assistant" | "system";
@@ -41,6 +42,7 @@ class SessionManager {
 
   constructor() {
     setInterval(() => this.cleanupOldSessions(), 15 * 60 * 1000);
+    this.loadSessionsFromDisk();
   }
 
   createSession(
@@ -64,13 +66,44 @@ class SessionManager {
     };
 
     this.sessions.set(sessionId, session);
+
+    // Сохраняем в файл
+    persistenceService.saveSession(session).catch((error) => {
+      console.error(
+        `[SESSION MANAGER] Failed to save new session: ${error.message}`
+      );
+    });
+
     console.log(`[SESSION CREATED] ${sessionId}`, {
       compressionEnabled: config.compressionEnabled,
       threshold: config.compressionThreshold,
     });
+
     return sessionId;
   }
 
+  /**
+   * Загрузить все сессии из файловой системы при старте сервера
+   */
+  private async loadSessionsFromDisk(): Promise<void> {
+    try {
+      console.log("[SESSION MANAGER] Loading sessions from disk...");
+      const sessions = await persistenceService.loadAllSessions();
+
+      for (const session of sessions) {
+        this.sessions.set(session.sessionId, session);
+      }
+
+      console.log(
+        `[SESSION MANAGER] Loaded ${sessions.length} sessions from disk`
+      );
+    } catch (error: any) {
+      console.error(
+        "[SESSION MANAGER] Failed to load sessions:",
+        error.message
+      );
+    }
+  }
   getSession(sessionId: string): Session | undefined {
     return this.sessions.get(sessionId);
   }
@@ -82,6 +115,14 @@ class SessionManager {
     }
 
     session.config = { ...session.config, ...config };
+
+    // Автосохранение после обновления конфига
+    persistenceService.saveSession(session).catch((error) => {
+      console.error(
+        `[SESSION MANAGER] Failed to save session: ${error.message}`
+      );
+    });
+
     console.log(`[SESSION CONFIG UPDATED] ${sessionId}`, session.config);
   }
 
@@ -94,6 +135,13 @@ class SessionManager {
     session.messages.push(message);
     session.totalMessages++;
     session.lastActivityAt = new Date();
+
+    // Автосохранение после добавления сообщения
+    persistenceService.saveSession(session).catch((error) => {
+      console.error(
+        `[SESSION MANAGER] Failed to save session: ${error.message}`
+      );
+    });
 
     console.log(
       `[SESSION ${sessionId}] Messages: ${session.messages.length}/${session.config.compressionThreshold}`
@@ -118,6 +166,13 @@ class SessionManager {
 
     session.summaries.push(summary);
     session.messages = [];
+
+    // Автосохранение после сжатия
+    persistenceService.saveSession(session).catch((error) => {
+      console.error(
+        `[SESSION MANAGER] Failed to save session: ${error.message}`
+      );
+    });
 
     console.log(
       `[SESSION ${sessionId}] Summary created. Total summaries: ${session.summaries.length}`
@@ -147,7 +202,13 @@ class SessionManager {
 
     return context;
   }
-
+  /**
+   * Восстановить сессию из загруженных данных
+   */
+  restoreSession(session: Session): void {
+    this.sessions.set(session.sessionId, session);
+    console.log(`[SESSION RESTORED] ${session.sessionId}`);
+  }
   getStats(sessionId: string) {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
@@ -187,6 +248,14 @@ class SessionManager {
 
   deleteSession(sessionId: string): void {
     this.sessions.delete(sessionId);
+
+    // Удаляем файл из файловой системы
+    persistenceService.deleteSession(sessionId).catch((error) => {
+      console.error(
+        `[SESSION MANAGER] Failed to delete session file: ${error.message}`
+      );
+    });
+
     console.log(`[SESSION DELETED] ${sessionId}`);
   }
 
