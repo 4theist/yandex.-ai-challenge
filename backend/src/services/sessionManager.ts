@@ -6,6 +6,11 @@ export interface Message {
   content: string;
   timestamp: Date;
   tokens?: number;
+  toolsCalled?: Array<{
+    name: string;
+    arguments: any;
+    result: string;
+  }>;
 }
 
 export interface Summary {

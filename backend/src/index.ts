@@ -7,6 +7,8 @@ import { callModel, ModelCallOptions, ModelResult } from "./utils/modelCaller";
 import { SessionConfig, sessionManager } from "./services/sessionManager";
 import { compressionService } from "./services/compressionService";
 import { persistenceService } from "./services/persistenceService";
+import { weatherService } from "./services/weatherService";
+import { agentService } from "./services/agentService";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -189,7 +191,7 @@ app.post("/api/dialog/create", (req, res) => {
 
 app.post("/api/dialog/message", async (req, res) => {
   try {
-    const { sessionId, message, options } = req.body;
+    const { sessionId, message, options, useTools } = req.body;
 
     if (!sessionId || !message) {
       return res.status(400).json({
@@ -204,6 +206,7 @@ app.post("/api/dialog/message", async (req, res) => {
       });
     }
 
+    // Добавляем сообщение пользователя
     sessionManager.addMessage(sessionId, {
       role: "user",
       content: message,
@@ -211,47 +214,100 @@ app.post("/api/dialog/message", async (req, res) => {
       tokens: Math.ceil(message.length / 4),
     });
 
+    // Проверяем необходимость компрессии
     let compressionTriggered = false;
     if (sessionManager.needsCompression(sessionId)) {
       console.log(`[DIALOG ${sessionId}] Triggering compression...`);
-
       const summary = await compressionService.createSummary(
         session.messages,
         session.config.summaryProvider || session.provider,
         session.config.summaryModel || session.model,
         session.temperature
       );
-
       sessionManager.addSummary(sessionId, summary);
       compressionTriggered = true;
     }
 
     const context = sessionManager.getContextForModel(sessionId);
 
-    const messages = context.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    // НОВАЯ ЛОГИКА: если useTools=true, используем autonomous agent
+    let result: ModelResult;
+    let toolsCalled: any[] = [];
+    let iterations = 1;
 
-    const result = await callModel(
-      session.provider,
-      session.model,
-      messages,
-      session.temperature,
-      {
-        systemPrompt: options?.systemPrompt,
-        maxTokens: options?.maxTokens,
-        topP: options?.topP,
-        frequencyPenalty: options?.frequencyPenalty,
-        presencePenalty: options?.presencePenalty,
-      }
-    );
+    if (useTools) {
+      console.log(`[DIALOG ${sessionId} + TOOLS] Processing with agent...`);
 
+      // Формируем полный промпт с контекстом диалога
+      const dialogContext = context
+        .map(
+          (msg) =>
+            `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`
+        )
+        .join("\n");
+
+      const fullQuery = `${dialogContext}\nUser: ${message}`;
+
+      const agentResult = await agentService.processQuery(
+        fullQuery,
+        session.provider,
+        session.model,
+        3
+      );
+
+      toolsCalled = agentResult.toolsCalled;
+      iterations = agentResult.iterations;
+
+      result = {
+        provider: session.provider,
+        model: session.model,
+        text: agentResult.answer,
+        metrics: {
+          latencyMs: agentResult.totalLatencyMs,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: agentResult.totalTokens,
+          cost: 0,
+          currency: session.provider === "yandex" ? "₽" : "FREE",
+          contextLimit: 8000,
+          outputLimit: 2000,
+          contextUsagePercent: 0,
+          outputUsagePercent: 0,
+        },
+      };
+
+      console.log(
+        `[DIALOG ${sessionId} + TOOLS] Tools called: ${toolsCalled.length}`
+      );
+    } else {
+      // Обычная логика без tools
+      const messages = context.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      result = await callModel(
+        session.provider,
+        session.model,
+        messages,
+        session.temperature,
+        {
+          systemPrompt: options?.systemPrompt,
+          maxTokens: options?.maxTokens,
+          topP: options?.topP,
+          frequencyPenalty: options?.frequencyPenalty,
+          presencePenalty: options?.presencePenalty,
+        }
+      );
+    }
+
+    // Добавляем ответ ассистента в историю
     sessionManager.addMessage(sessionId, {
       role: "assistant",
       content: result.text,
       timestamp: new Date(),
       tokens: result.metrics.totalTokens,
+      toolsCalled: toolsCalled.length > 0 ? toolsCalled : undefined,
     });
 
     const stats = sessionManager.getStats(sessionId);
@@ -260,6 +316,8 @@ app.post("/api/dialog/message", async (req, res) => {
       result,
       stats,
       compressionTriggered,
+      toolsCalled, // ← NEW
+      iterations, // ← NEW
       context: {
         messagesInContext: context.length,
         summariesCount: session.summaries.length,
@@ -273,6 +331,92 @@ app.post("/api/dialog/message", async (req, res) => {
     });
   }
 });
+// app.post("/api/dialog/message", async (req, res) => {
+//   try {
+//     const { sessionId, message, options } = req.body;
+
+//     if (!sessionId || !message) {
+//       return res.status(400).json({
+//         error: "sessionId и message обязательны",
+//       });
+//     }
+
+//     const session = sessionManager.getSession(sessionId);
+//     if (!session) {
+//       return res.status(404).json({
+//         error: "Сессия не найдена",
+//       });
+//     }
+
+//     sessionManager.addMessage(sessionId, {
+//       role: "user",
+//       content: message,
+//       timestamp: new Date(),
+//       tokens: Math.ceil(message.length / 4),
+//     });
+
+//     let compressionTriggered = false;
+//     if (sessionManager.needsCompression(sessionId)) {
+//       console.log(`[DIALOG ${sessionId}] Triggering compression...`);
+
+//       const summary = await compressionService.createSummary(
+//         session.messages,
+//         session.config.summaryProvider || session.provider,
+//         session.config.summaryModel || session.model,
+//         session.temperature
+//       );
+
+//       sessionManager.addSummary(sessionId, summary);
+//       compressionTriggered = true;
+//     }
+
+//     const context = sessionManager.getContextForModel(sessionId);
+
+//     const messages = context.map((msg) => ({
+//       role: msg.role,
+//       content: msg.content,
+//     }));
+
+//     const result = await callModel(
+//       session.provider,
+//       session.model,
+//       messages,
+//       session.temperature,
+//       {
+//         systemPrompt: options?.systemPrompt,
+//         maxTokens: options?.maxTokens,
+//         topP: options?.topP,
+//         frequencyPenalty: options?.frequencyPenalty,
+//         presencePenalty: options?.presencePenalty,
+//       }
+//     );
+
+//     sessionManager.addMessage(sessionId, {
+//       role: "assistant",
+//       content: result.text,
+//       timestamp: new Date(),
+//       tokens: result.metrics.totalTokens,
+//     });
+
+//     const stats = sessionManager.getStats(sessionId);
+
+//     res.json({
+//       result,
+//       stats,
+//       compressionTriggered,
+//       context: {
+//         messagesInContext: context.length,
+//         summariesCount: session.summaries.length,
+//       },
+//     });
+//   } catch (error: any) {
+//     console.error("[DIALOG MESSAGE ERROR]", error);
+//     res.status(500).json({
+//       error: "Не удалось отправить сообщение",
+//       details: error.message,
+//     });
+//   }
+// });
 
 app.get("/api/dialog/:sessionId/stats", (req, res) => {
   try {
@@ -485,6 +629,70 @@ app.get("/api/dialog/:sessionId/export", (req, res) => {
   }
 });
 
+app.post("/api/weather", async (req, res) => {
+  try {
+    const { city, days } = req.body;
+
+    if (!city) {
+      return res.status(400).json({ error: "City is required" });
+    }
+
+    if (days) {
+      // Прогноз
+      const forecast = await weatherService.getForecast(city, days);
+      res.json({
+        type: "forecast",
+        data: forecast.data,
+        latencyMs: forecast.latencyMs,
+      });
+    } else {
+      // Текущая погода
+      const weather = await weatherService.getCurrentWeather(city);
+      res.json({
+        type: "current",
+        data: weather.data,
+        latencyMs: weather.latencyMs,
+      });
+    }
+  } catch (error: any) {
+    console.error("[WEATHER ENDPOINT ERROR]", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+// ============================================
+//  Получить доступные MCP tools
+// ============================================
+app.get("/api/tools", async (req, res) => {
+  try {
+    await agentService.initialize();
+    const tools = (agentService as any).availableTools; // если нужно сделать публичным
+
+    res.json({
+      tools: tools || [],
+      count: tools?.length || 0,
+    });
+  } catch (error: any) {
+    console.error("[GET TOOLS ERROR]", error);
+    res.status(500).json({
+      error: "Не удалось получить список инструментов",
+      details: error.message,
+    });
+  }
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\n[SERVER] Shutting down gracefully...");
+  await agentService.close();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("\n[SERVER] Shutting down gracefully...");
+  await agentService.close();
+  process.exit(0);
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -527,6 +735,7 @@ app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/api/dialog/:id/restore`);
   console.log(`  GET  http://localhost:${PORT}/api/dialog/:id/export`);
   console.log(`  DELETE http://localhost:${PORT}/api/dialog/:id`);
+  console.log(`  GET  http://localhost:${PORT}/api/tools`);
   console.log(`  GET  http://localhost:${PORT}/api/health`);
 });
 

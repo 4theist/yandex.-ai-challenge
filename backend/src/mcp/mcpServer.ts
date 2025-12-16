@@ -1,3 +1,4 @@
+import "../config/env";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,9 +9,58 @@ import {
 import { callModel } from "../utils/modelCaller";
 import { compressionService } from "../services/compressionService";
 import { MODELS_CONFIG } from "../config/models";
-
+import { weatherService } from "../services/weatherService";
 // Определяем доступные MCP tools
 const TOOLS: Tool[] = [
+  {
+    name: "get_current_weather",
+    description: "Получить текущую погоду для указанного города",
+    inputSchema: {
+      type: "object",
+      properties: {
+        city: {
+          type: "string",
+          description: "Название города (на английском: Moscow, London, Paris)",
+        },
+        includeAqi: {
+          type: "boolean",
+          description: "Включить данные о качестве воздуха",
+          default: false,
+        },
+        formatForAgent: {
+          type: "boolean",
+          description: "Форматировать ответ для удобства чтения агентом",
+          default: true,
+        },
+      },
+      required: ["city"],
+    },
+  },
+  {
+    name: "get_weather_forecast",
+    description: "Получить прогноз погоды на несколько дней (1-10)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        city: {
+          type: "string",
+          description: "Название города",
+        },
+        days: {
+          type: "number",
+          description: "Количество дней прогноза (1-10)",
+          default: 3,
+        },
+        formatForAgent: {
+          type: "boolean",
+          description: "Форматировать ответ для удобства чтения агентом",
+          default: true,
+        },
+      },
+      required: ["city"],
+    },
+  },
+
   {
     name: "call_ai_model",
     description: "Вызов AI модели (Yandex или OpenRouter) с заданным промптом",
@@ -235,6 +285,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: JSON.stringify(summary, null, 2),
+            },
+          ],
+        };
+      }
+      case "get_current_weather": {
+        const {
+          city,
+          includeAqi = false,
+          formatForAgent = true,
+        } = request.params.arguments as any;
+
+        const result = await weatherService.getCurrentWeather(city, includeAqi);
+
+        const responseText = formatForAgent
+          ? weatherService.formatWeatherForAgent(result.data)
+          : JSON.stringify(result, null, 2);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: responseText,
+            },
+          ],
+        };
+      }
+
+      case "get_weather_forecast": {
+        const {
+          city,
+          days = 3,
+          formatForAgent = true,
+        } = request.params.arguments as any;
+
+        const result = await weatherService.getForecast(city, days);
+
+        const responseText = formatForAgent
+          ? weatherService.formatForecastForAgent(result.data)
+          : JSON.stringify(result, null, 2);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: responseText,
             },
           ],
         };

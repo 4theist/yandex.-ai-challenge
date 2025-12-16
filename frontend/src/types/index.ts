@@ -77,6 +77,11 @@ export interface DialogMessage {
   content: string;
   timestamp: Date;
   tokens?: number;
+  toolsCalled?: Array<{
+    name: string;
+    arguments: any;
+    result: string;
+  }>;
 }
 
 export interface DialogSummary {
@@ -111,6 +116,12 @@ export interface DialogResponse {
   result: ModelResult;
   stats: SessionStats;
   compressionTriggered: boolean;
+  toolsCalled?: Array<{
+    name: string;
+    arguments: any;
+    result: string;
+  }>;
+  iterations?: number;
   context: {
     messagesInContext: number;
     summariesCount: number;

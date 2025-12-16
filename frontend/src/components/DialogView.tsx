@@ -40,6 +40,9 @@ export const DialogView: React.FC = () => {
   const [savedSessions, setSavedSessions] = useState<SavedSessionInfo[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // NEW: Tools state
+  const [useTools, setUseTools] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadSavedSessions = async () => {
@@ -54,6 +57,7 @@ export const DialogView: React.FC = () => {
   // Start new session
   const handleStartSession = async () => {
     if (!selectedModel) return;
+
     setIsLoading(true);
     try {
       const response = await createDialogSession(
@@ -74,7 +78,7 @@ export const DialogView: React.FC = () => {
       setSessionId(response.sessionId);
       setMessages([]);
       setStats(null);
-      await loadSavedSessions(); // Обновляем список
+      await loadSavedSessions();
       console.log("Session created:", response.sessionId);
     } catch (error: any) {
       alert("Ошибка создания сессии: " + error.message);
@@ -83,7 +87,7 @@ export const DialogView: React.FC = () => {
     }
   };
 
-  // Send message
+  // UPDATED: Send message with tools support
   const handleSendMessage = async () => {
     if (!sessionId || !message.trim()) return;
 
@@ -100,6 +104,7 @@ export const DialogView: React.FC = () => {
     try {
       const response = await sendDialogMessage(sessionId, message, {
         systemPrompt,
+        useTools, // NEW
       });
 
       const assistantMessage: DialogMessage = {
@@ -107,14 +112,23 @@ export const DialogView: React.FC = () => {
         content: response.result.text,
         timestamp: new Date(),
         tokens: response.result.metrics.totalTokens,
+        toolsCalled: response.toolsCalled, // NEW
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
       setStats(response.stats);
-      await loadSavedSessions(); // Обновляем список после каждого сообщения
+      await loadSavedSessions();
 
       if (response.compressionTriggered) {
         console.log("🔥 Compression triggered!");
+      }
+
+      // NEW: Log tools usage
+      if (response.toolsCalled && response.toolsCalled.length > 0) {
+        console.log(
+          `🔧 Tools used: ${response.toolsCalled.length}`,
+          response.toolsCalled
+        );
       }
     } catch (error: any) {
       alert("Ошибка отправки сообщения: " + error.message);
@@ -143,6 +157,7 @@ export const DialogView: React.FC = () => {
   // Manual compression
   const handleManualCompress = async () => {
     if (!sessionId) return;
+
     setIsLoading(true);
     try {
       const response = await compressSession(sessionId);
@@ -180,10 +195,9 @@ export const DialogView: React.FC = () => {
       setCompressionThreshold(response.session.config.compressionThreshold);
       setStats(response.stats);
 
-      // Загружаем полную историю сообщений
+      // Load full message history
       try {
         const history = await getSessionHistory(restoredSessionId);
-
         const loadedMessages: DialogMessage[] = [];
 
         for (const summary of history.summaries) {
@@ -276,22 +290,18 @@ export const DialogView: React.FC = () => {
   return (
     <div style={styles.container}>
       {/* Sidebar */}
-      <div
-        style={{
-          ...styles.sidebar,
-          width: sidebarCollapsed ? "60px" : "280px",
-        }}
-      >
-        <div style={styles.sidebarHeader}>
-          {!sidebarCollapsed && (
+      {!sidebarCollapsed && (
+        <div style={styles.sidebar}>
+          <div style={styles.sidebarHeader}>
             <button
               onClick={handleNewSession}
               style={styles.newSessionButton}
-              disabled={isLoading}
+              disabled={!sessionId}
             >
               ➕ Новая сессия
             </button>
-          )}
+          </div>
+
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             style={styles.collapseButton}
@@ -299,70 +309,70 @@ export const DialogView: React.FC = () => {
           >
             {sidebarCollapsed ? "▶️" : "◀️"}
           </button>
-        </div>
 
-        {!sidebarCollapsed && (
-          <div style={styles.sessionsList}>
-            {savedSessions.length === 0 ? (
-              <div style={styles.emptyState}>
-                <div style={styles.emptyIcon}>💬</div>
-                <div style={styles.emptyText}>Нет сессий</div>
-              </div>
-            ) : (
-              savedSessions.map((session) => (
-                <div
-                  key={session.sessionId}
-                  style={{
-                    ...styles.sessionItem,
-                    ...(sessionId === session.sessionId
-                      ? styles.sessionItemActive
-                      : {}),
-                  }}
-                  onClick={() => handleRestoreSession(session.sessionId)}
-                >
-                  <div style={styles.sessionItemHeader}>
-                    <span style={styles.sessionItemIcon}>
-                      {session.provider === "yandex" ? "🟣" : "🔵"}
-                    </span>
-                    <span style={styles.sessionItemTime}>
-                      {formatTimeAgo(session.lastActivity)}
-                    </span>
-                  </div>
-                  <div style={styles.sessionItemPreview}>
-                    {getSessionPreview(session)}
-                  </div>
-                  <div style={styles.sessionItemActions}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleExportSession(session.sessionId);
-                      }}
-                      style={styles.sessionActionButton}
-                      title="Экспорт"
-                    >
-                      📥
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm("Удалить эту сессию?")) {
-                          deleteSession(session.sessionId).then(
-                            loadSavedSessions
-                          );
-                        }
-                      }}
-                      style={styles.sessionActionButton}
-                      title="Удалить"
-                    >
-                      🗑️
-                    </button>
-                  </div>
+          {!sidebarCollapsed && (
+            <div style={styles.sessionsList}>
+              {savedSessions.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <div style={styles.emptyIcon}>💬</div>
+                  <div style={styles.emptyText}>Нет сессий</div>
                 </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+              ) : (
+                savedSessions.map((session) => (
+                  <div
+                    key={session.sessionId}
+                    style={{
+                      ...styles.sessionItem,
+                      ...(sessionId === session.sessionId
+                        ? styles.sessionItemActive
+                        : {}),
+                    }}
+                    onClick={() => handleRestoreSession(session.sessionId)}
+                  >
+                    <div style={styles.sessionItemHeader}>
+                      <span style={styles.sessionItemIcon}>
+                        {session.provider === "yandex" ? "🟣" : "🔵"}
+                      </span>
+                      <span style={styles.sessionItemTime}>
+                        {formatTimeAgo(session.lastActivity)}
+                      </span>
+                    </div>
+                    <div style={styles.sessionItemPreview}>
+                      {getSessionPreview(session)}
+                    </div>
+                    <div style={styles.sessionItemActions}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportSession(session.sessionId);
+                        }}
+                        style={styles.sessionActionButton}
+                        title="Экспорт"
+                      >
+                        💾
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm("Удалить эту сессию?")) {
+                            deleteSession(session.sessionId).then(
+                              loadSavedSessions
+                            );
+                          }
+                        }}
+                        style={styles.sessionActionButton}
+                        title="Удалить"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main content */}
       <div style={styles.mainContent}>
@@ -409,7 +419,7 @@ export const DialogView: React.FC = () => {
               <input
                 type="range"
                 min="0"
-                max="1.2"
+                max="1"
                 step="0.1"
                 value={temperature}
                 onChange={(e) => setTemperature(parseFloat(e.target.value))}
@@ -459,8 +469,8 @@ export const DialogView: React.FC = () => {
                     <input
                       type="range"
                       min="5"
-                      max="20"
-                      step="1"
+                      max="30"
+                      step="5"
                       value={compressionThreshold}
                       onChange={(e) =>
                         setCompressionThreshold(parseInt(e.target.value))
@@ -474,8 +484,8 @@ export const DialogView: React.FC = () => {
 
             <button
               onClick={handleStartSession}
-              style={styles.startButton}
               disabled={isLoading || !selectedModel}
+              style={styles.startButton}
             >
               {isLoading ? "⏳ Создание..." : "🚀 Начать диалог"}
             </button>
@@ -503,20 +513,19 @@ export const DialogView: React.FC = () => {
                   </div>
                 )}
               </div>
+
               <div style={styles.headerRight}>
                 <button
                   onClick={handleManualCompress}
+                  disabled={isLoading || messages.length === 0}
                   style={styles.compressButton}
-                  disabled={isLoading}
-                  title="Сжать текущие сообщения"
                 >
                   🗜️ Сжать
                 </button>
                 <button
                   onClick={handleEndSession}
-                  style={styles.endButton}
                   disabled={isLoading}
-                  title="Завершить и удалить сессию"
+                  style={styles.endButton}
                 >
                   🗑️ Удалить
                 </button>
@@ -538,20 +547,48 @@ export const DialogView: React.FC = () => {
                   }}
                 >
                   <div style={styles.messageHeader}>
-                    <span style={styles.messageRole}>
+                    <div style={styles.messageRole}>
                       {msg.role === "user"
                         ? "👤 Вы"
                         : msg.role === "system"
                         ? "📦 Содержание"
                         : "🤖 Ассистент"}
-                    </span>
+                    </div>
                     {msg.tokens && (
-                      <span style={styles.messageTokens}>
+                      <div style={styles.messageTokens}>
                         {msg.tokens} токенов
-                      </span>
+                      </div>
                     )}
                   </div>
                   <div style={styles.messageContent}>{msg.content}</div>
+
+                  {/* NEW: Display tools called */}
+                  {msg.toolsCalled && msg.toolsCalled.length > 0 && (
+                    <details style={styles.toolsDetails}>
+                      <summary style={styles.toolsSummary}>
+                        🔧 Использовано инструментов: {msg.toolsCalled.length}
+                      </summary>
+                      <div style={styles.toolsList}>
+                        {msg.toolsCalled.map((tool, idx) => (
+                          <div key={idx} style={styles.toolItem}>
+                            <div style={styles.toolName}>📍 {tool.name}</div>
+                            <div style={styles.toolArgs}>
+                              <strong>Параметры:</strong>
+                              <pre style={styles.toolCode}>
+                                {JSON.stringify(tool.arguments, null, 2)}
+                              </pre>
+                            </div>
+                            <details>
+                              <summary style={styles.toolResultSummary}>
+                                Показать результат
+                              </summary>
+                              <pre style={styles.toolResult}>{tool.result}</pre>
+                            </details>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               ))}
 
@@ -561,21 +598,42 @@ export const DialogView: React.FC = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
+            {/* UPDATED: Input with tools checkbox */}
             <div style={styles.inputContainer}>
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Введите сообщение... (Enter для отправки)"
-                rows={3}
-                style={styles.input}
-                disabled={isLoading}
-              />
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                }}
+              >
+                <textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Введите сообщение... (Enter для отправки)"
+                  rows={3}
+                  style={styles.input}
+                  disabled={isLoading}
+                />
+
+                {/* NEW: Tools checkbox */}
+                <label style={styles.toolsCheckboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={useTools}
+                    onChange={(e) => setUseTools(e.target.checked)}
+                    style={styles.checkbox}
+                  />
+                  🔧 Разрешить использование инструментов (погода и др.)
+                </label>
+              </div>
+
               <button
                 onClick={handleSendMessage}
-                style={styles.sendButton}
                 disabled={isLoading || !message.trim()}
+                style={styles.sendButton}
               >
                 {isLoading ? "⏳" : "📤"} Отправить
               </button>
@@ -586,6 +644,7 @@ export const DialogView: React.FC = () => {
     </div>
   );
 };
+
 const styles: Record<string, React.CSSProperties> = {
   container: {
     display: "flex",
@@ -1005,5 +1064,94 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
     transition: "all 0.2s",
     whiteSpace: "nowrap",
+  },
+
+  toolsCheckboxLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "12px",
+    color: "#a1a1aa",
+    cursor: "pointer",
+    padding: "4px 0",
+    userSelect: "none",
+  },
+
+  toolsDetails: {
+    marginTop: "12px",
+    padding: "12px",
+    backgroundColor: "rgba(99, 102, 241, 0.08)",
+    borderRadius: "8px",
+    border: "1px solid rgba(99, 102, 241, 0.25)",
+  },
+
+  toolsSummary: {
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#8b5cf6",
+    padding: "4px 0",
+    userSelect: "none",
+  },
+
+  toolsList: {
+    marginTop: "10px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+
+  toolItem: {
+    padding: "10px",
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    borderRadius: "6px",
+    fontSize: "11px",
+    border: "1px solid rgba(99, 102, 241, 0.15)",
+  },
+
+  toolName: {
+    fontWeight: "700",
+    marginBottom: "8px",
+    color: "#a78bfa",
+    fontSize: "12px",
+  },
+
+  toolArgs: {
+    marginBottom: "8px",
+    color: "#d4d4d8",
+  },
+
+  toolCode: {
+    marginTop: "4px",
+    padding: "8px",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderRadius: "4px",
+    fontSize: "10px",
+    overflow: "auto",
+    color: "#fafafa",
+    fontFamily: "monospace",
+  },
+
+  toolResultSummary: {
+    cursor: "pointer",
+    fontSize: "11px",
+    color: "#a1a1aa",
+    marginTop: "6px",
+    fontWeight: "600",
+    userSelect: "none",
+  },
+
+  toolResult: {
+    marginTop: "6px",
+    padding: "10px",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    borderRadius: "4px",
+    fontSize: "10px",
+    overflow: "auto",
+    maxHeight: "300px",
+    color: "#fafafa",
+    fontFamily: "monospace",
+    lineHeight: "1.4",
+    whiteSpace: "pre-wrap",
   },
 };

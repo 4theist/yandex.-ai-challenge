@@ -170,6 +170,7 @@ export async function createDialogSession(
 /**
  * Отправить сообщение в диалог
  */
+
 export async function sendDialogMessage(
   sessionId: string,
   message: string,
@@ -179,6 +180,7 @@ export async function sendDialogMessage(
     topP?: number;
     frequencyPenalty?: number;
     presencePenalty?: number;
+    useTools?: boolean; // ← ADD
   }
 ): Promise<DialogResponse> {
   const response = await fetch(`${API_BASE_URL}api/dialog/message`, {
@@ -190,6 +192,7 @@ export async function sendDialogMessage(
       sessionId,
       message,
       options,
+      useTools: options?.useTools, // ← ADD
     }),
   });
 
