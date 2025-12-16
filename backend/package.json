@@ -4,9 +4,11 @@
     "scripts": {
         "dev": "ts-node-dev --respawn src/index.ts",
         "build": "tsc",
-        "start": "node dist/index.js"
+        "start": "node dist/index.js",
+        "mcp:client": "ts-node-dev src/mcp/mcpClient.ts"
     },
     "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.25.0",
         "axios": "^1.6.0",
         "cors": "^2.8.5",
         "dotenv": "^16.3.1",
