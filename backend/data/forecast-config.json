@@ -1,0 +1,10 @@
+{
+  "schedule": "0 8 * * *",
+  "cities": [
+    "Moscow",
+    "Saint Petersburg"
+  ],
+  "enabled": true,
+  "lastRun": null,
+  "nextRun": null
+}

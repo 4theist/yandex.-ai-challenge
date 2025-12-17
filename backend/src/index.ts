@@ -9,6 +9,9 @@ import { compressionService } from "./services/compressionService";
 import { persistenceService } from "./services/persistenceService";
 import { weatherService } from "./services/weatherService";
 import { agentService } from "./services/agentService";
+import { forecastRunner } from "./jobs/forecastRunner";
+import { forecastScheduler } from "./services/forecastScheduler";
+import { forecastStorage } from "./services/forecastStorage";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -143,6 +146,180 @@ app.use(
     });
   }
 );
+// ============================================
+// FORECAST API
+// ============================================
+
+/**
+ * Получить последнюю сводку
+ */
+app.get("/api/forecast/latest", async (req, res) => {
+  try {
+    const summary = await forecastStorage.getLatestSummary();
+
+    if (!summary) {
+      return res.json({
+        generated: false,
+        message: "No forecasts generated yet",
+      });
+    }
+
+    res.json({
+      generated: true,
+      ...summary,
+    });
+  } catch (error: any) {
+    console.error("[GET FORECAST LATEST ERROR]", error);
+    res.status(500).json({
+      error: "Failed to get latest forecast",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Получить историю сводок
+ */
+app.get("/api/forecast/history", async (req, res) => {
+  try {
+    const days = parseInt(req.query.days as string) || 7;
+    const history = await forecastStorage.getHistory(days);
+
+    res.json({
+      count: history.length,
+      days,
+      forecasts: history,
+    });
+  } catch (error: any) {
+    console.error("[GET FORECAST HISTORY ERROR]", error);
+    res.status(500).json({
+      error: "Failed to get forecast history",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Получить текущую конфигурацию
+ */
+app.get("/api/forecast/config", async (req, res) => {
+  try {
+    const config = forecastScheduler.getConfig();
+
+    if (!config) {
+      return res.status(404).json({
+        error: "Config not found",
+      });
+    }
+
+    res.json(config);
+  } catch (error: any) {
+    console.error("[GET FORECAST CONFIG ERROR]", error);
+    res.status(500).json({
+      error: "Failed to get config",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Обновить конфигурацию
+ */
+app.post("/api/forecast/config", async (req, res) => {
+  try {
+    const { schedule, enabled } = req.body;
+
+    if (schedule) {
+      await forecastScheduler.updateSchedule(schedule);
+    }
+
+    if (enabled !== undefined) {
+      await forecastScheduler.setEnabled(enabled);
+    }
+
+    const updatedConfig = forecastScheduler.getConfig();
+
+    res.json({
+      message: "Config updated",
+      config: updatedConfig,
+    });
+  } catch (error: any) {
+    console.error("[UPDATE FORECAST CONFIG ERROR]", error);
+    res.status(500).json({
+      error: "Failed to update config",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Сгенерировать сводку прямо сейчас
+ */
+app.post("/api/forecast/generate-now", async (req, res) => {
+  try {
+    console.log("[FORECAST GENERATE NOW] Manual trigger");
+    const summary = await forecastRunner.executeNow();
+
+    res.json({
+      message: "Forecast generated successfully",
+      summary,
+    });
+  } catch (error: any) {
+    console.error("[FORECAST GENERATE NOW ERROR]", error);
+    res.status(500).json({
+      error: "Failed to generate forecast",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Получить логи forecast runner
+ */
+app.get("/api/forecast/logs", async (req, res) => {
+  try {
+    const lines = parseInt(req.query.lines as string) || 50;
+    const logs = await forecastRunner.getRecentLogs(lines);
+
+    res.json({
+      count: logs.length,
+      logs,
+    });
+  } catch (error: any) {
+    console.error("[GET FORECAST LOGS ERROR]", error);
+    res.status(500).json({
+      error: "Failed to get logs",
+      details: error.message,
+    });
+  }
+});
+
+/**
+ * Получить статистику storage
+ */
+app.get("/api/forecast/stats", async (req, res) => {
+  try {
+    const stats = await forecastStorage.getStats();
+    const config = forecastScheduler.getConfig();
+
+    res.json({
+      storage: stats,
+      scheduler: {
+        enabled: config?.enabled,
+        schedule: config?.schedule,
+        lastRun: config?.lastRun,
+        nextRun: config?.nextRun,
+      },
+    });
+  } catch (error: any) {
+    console.error("[GET FORECAST STATS ERROR]", error);
+    res.status(500).json({
+      error: "Failed to get stats",
+      details: error.message,
+    });
+  }
+});
+
 // ============================================
 // DIALOG API
 // ============================================
@@ -680,19 +857,6 @@ app.get("/api/tools", async (req, res) => {
   }
 });
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("\n[SERVER] Shutting down gracefully...");
-  await agentService.close();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  console.log("\n[SERVER] Shutting down gracefully...");
-  await agentService.close();
-  process.exit(0);
-});
-
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -735,8 +899,35 @@ app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/api/dialog/:id/restore`);
   console.log(`  GET  http://localhost:${PORT}/api/dialog/:id/export`);
   console.log(`  DELETE http://localhost:${PORT}/api/dialog/:id`);
+  console.log(`  GET  http://localhost:${PORT}/api/forecast/latest`);
+  console.log(`  GET  http://localhost:${PORT}/api/forecast/history`);
+  console.log(`  GET  http://localhost:${PORT}/api/forecast/config`);
+  console.log(`  POST http://localhost:${PORT}/api/forecast/config`);
+  console.log(`  POST http://localhost:${PORT}/api/forecast/generate-now`);
+  console.log(`  GET  http://localhost:${PORT}/api/forecast/logs`);
+  console.log(`  GET  http://localhost:${PORT}/api/forecast/stats`);
   console.log(`  GET  http://localhost:${PORT}/api/tools`);
   console.log(`  GET  http://localhost:${PORT}/api/health`);
+
+  // Запускаем forecast runner
+  console.log(`\n⏰ Starting forecast runner...`);
+  try {
+    forecastRunner.start();
+  } catch (error: any) {
+    console.error("Failed to start forecast runner:", error.message);
+  }
 });
 
+process.on("SIGTERM", async () => {
+  console.log("\n[SERVER] Shutting down gracefully...");
+  await agentService.close();
+  process.exit(0);
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\n[SERVER] Shutting down gracefully...");
+  await agentService.close();
+  process.exit(0);
+});
 export default app;

@@ -11,6 +11,11 @@ import {
   RestoreSessionResponse,
   SessionsListResponse,
   SessionHistory,
+  ForecastLatestResponse,
+  ForecastHistoryResponse,
+  ForecastConfig,
+  ForecastSummary,
+  ForecastStatsResponse,
 } from "./types";
 
 const API_BASE_URL = "";
@@ -350,4 +355,98 @@ export async function exportSession(sessionId: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   window.URL.revokeObjectURL(url);
+}
+
+// ============================================
+// FORECAST API
+// ============================================
+
+/**
+ * Получить последнюю сводку погоды
+ */
+export async function getLatestForecast(): Promise<ForecastLatestResponse> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/latest`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get latest forecast");
+  }
+  return response.json();
+}
+
+/**
+ * Получить историю сводок
+ */
+export async function getForecastHistory(
+  days: number = 7
+): Promise<ForecastHistoryResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}api/forecast/history?days=${days}`
+  );
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get forecast history");
+  }
+  return response.json();
+}
+
+/**
+ * Получить конфигурацию forecast
+ */
+export async function getForecastConfig(): Promise<ForecastConfig> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/config`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get forecast config");
+  }
+  return response.json();
+}
+
+/**
+ * Обновить конфигурацию forecast
+ */
+export async function updateForecastConfig(config: {
+  schedule?: string;
+  enabled?: boolean;
+}): Promise<{ message: string; config: ForecastConfig }> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/config`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to update forecast config");
+  }
+  return response.json();
+}
+
+/**
+ * Сгенерировать сводку сейчас
+ */
+export async function generateForecastNow(): Promise<{
+  message: string;
+  summary: ForecastSummary;
+}> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/generate-now`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to generate forecast");
+  }
+  return response.json();
+}
+
+/**
+ * Получить статистику forecast
+ */
+export async function getForecastStats(): Promise<ForecastStatsResponse> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/stats`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to get forecast stats");
+  }
+  return response.json();
 }

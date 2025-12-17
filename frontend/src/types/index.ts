@@ -171,3 +171,58 @@ export interface SessionHistory {
   context: DialogMessage[];
   totalMessages: number;
 }
+
+// Forecast types
+export interface ForecastSummary {
+  id: string;
+  date: string;
+  summaries: {
+    [city: string]: string;
+  };
+  weatherData: {
+    [city: string]: any;
+  };
+  tokensUsed: number;
+  generatedBy: string;
+  createdAt: string;
+}
+
+export interface ForecastConfig {
+  schedule: string;
+  cities: string[];
+  enabled: boolean;
+  lastRun: string | null;
+  nextRun: string | null;
+}
+
+export interface ForecastLatestResponse {
+  generated: boolean;
+  message?: string;
+  id?: string;
+  date?: string;
+  summaries?: {
+    [city: string]: string;
+  };
+  tokensUsed?: number;
+  createdAt?: string;
+}
+
+export interface ForecastHistoryResponse {
+  count: number;
+  days: number;
+  forecasts: ForecastSummary[];
+}
+
+export interface ForecastStatsResponse {
+  storage: {
+    total: number;
+    oldestDate: string | null;
+    newestDate: string | null;
+  };
+  scheduler: {
+    enabled: boolean;
+    schedule: string;
+    lastRun: string | null;
+    nextRun: string | null;
+  };
+}

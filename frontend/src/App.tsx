@@ -3,6 +3,7 @@ import { checkHealth } from "./api";
 import { SingleModelView } from "./components/SingleModelView";
 import { CompareView } from "./components/CompareView";
 import { DialogView } from "./components/DialogView";
+import { ForecastWidget } from "./components/ForecastWidget";
 
 function App() {
   const [mode, setMode] = useState<"single" | "compare" | "dialog">("single");
@@ -19,9 +20,10 @@ function App() {
     <div style={styles.container}>
       <header style={styles.header}>
         <div style={styles.headerContent}>
+          <ForecastWidget />
           {/* Left: Title */}
           <div style={styles.headerLeft}>
-            <h1 style={styles.title}>🤖 AI Models Comparison</h1>
+            <h1 style={styles.title}>🤖 AI Models</h1>
           </div>
 
           {/* Mode switcher */}
