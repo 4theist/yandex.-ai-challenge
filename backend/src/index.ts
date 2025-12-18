@@ -12,6 +12,9 @@ import { agentService } from "./services/agentService";
 import { forecastRunner } from "./jobs/forecastRunner";
 import { forecastScheduler } from "./services/forecastScheduler";
 import { forecastStorage } from "./services/forecastStorage";
+import { fileWriterService } from "./services/fileWriterService";
+import { summarizationService } from "./services/summarizationService";
+import { documentSearchService } from "./services/documentSearchService";
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -477,7 +480,11 @@ app.post("/api/dialog/message", async (req, res) => {
         }
       );
     }
-
+    console.log("[DIALOG MESSAGE SAVING]", {
+      resultText: result.text,
+      textLength: result.text?.length || 0,
+      toolsCalledCount: toolsCalled.length,
+    });
     // Добавляем ответ ассистента в историю
     sessionManager.addMessage(sessionId, {
       role: "assistant",
@@ -488,13 +495,17 @@ app.post("/api/dialog/message", async (req, res) => {
     });
 
     const stats = sessionManager.getStats(sessionId);
-
+    console.log("[DIALOG RESPONSE]", {
+      resultText: result.text,
+      textLength: result.text?.length || 0,
+      statsMessages: stats?.totalMessages,
+    });
     res.json({
       result,
       stats,
       compressionTriggered,
-      toolsCalled, // ← NEW
-      iterations, // ← NEW
+      toolsCalled,
+      iterations,
       context: {
         messagesInContext: context.length,
         summariesCount: session.summaries.length,
@@ -853,6 +864,233 @@ app.get("/api/tools", async (req, res) => {
     res.status(500).json({
       error: "Не удалось получить список инструментов",
       details: error.message,
+    });
+  }
+});
+/**
+ * Создать ретроспективную сводку за N дней
+ */
+app.post("/api/forecast/summary/retrospective", async (req, res) => {
+  try {
+    const { days = 7, cities } = req.body;
+
+    console.log(`[RETROSPECTIVE SUMMARY] Generating for ${days} days`);
+
+    // Шаг 1: Поиск прогнозов
+    const searchResult = await documentSearchService.searchForecasts(
+      days,
+      cities
+    );
+
+    if (searchResult.found === 0) {
+      return res.json({
+        success: false,
+        message: "Нет данных за указанный период",
+      });
+    }
+
+    // Шаг 2: Суммаризация
+    const summaryResult = await summarizationService.createRetrospectiveSummary(
+      searchResult.forecasts
+    );
+
+    // Шаг 3: Сохранение в файл
+    const savedFile = await fileWriterService.saveFile({
+      content: summaryResult.summary,
+      title: `Сводка за ${days} дней`,
+      format: "md",
+    });
+
+    res.json({
+      success: true,
+      summary: summaryResult.summary,
+      tokensUsed: summaryResult.tokensUsed,
+      forecastsAnalyzed: searchResult.found,
+      savedFile: {
+        filename: savedFile.filename,
+        path: savedFile.path,
+        size: savedFile.size,
+      },
+    });
+  } catch (error: any) {
+    console.error("[RETROSPECTIVE SUMMARY ERROR]", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Создать прогностическую сводку на N дней
+ */
+app.post("/api/forecast/summary/forecast", async (req, res) => {
+  try {
+    const { days = 7, cities = ["Moscow", "Saint Petersburg"] } = req.body;
+
+    console.log(`[FORECAST SUMMARY] Generating for ${days} days ahead`);
+
+    // Шаг 1: Получить прогноз погоды на будущее
+    const forecastsData = [];
+
+    for (const city of cities) {
+      try {
+        // Используем существующий метод getForecast
+        const forecast = await weatherService.getForecast(city, days);
+
+        // Добавляем данные из прогноза
+        if (forecast.data?.forecast?.forecastday) {
+          forecastsData.push(...forecast.data.forecast.forecastday);
+        }
+      } catch (error: any) {
+        console.error(`Failed to get forecast for ${city}:`, error.message);
+      }
+    }
+
+    if (forecastsData.length === 0) {
+      return res.json({
+        success: false,
+        message: "Не удалось получить данные прогноза",
+      });
+    }
+
+    // Шаг 2: Суммаризация
+    const summaryResult = await summarizationService.createForecastSummary(
+      forecastsData
+    );
+
+    // Шаг 3: Сохранение
+    const savedFile = await fileWriterService.saveFile({
+      content: summaryResult.summary,
+      title: `Прогноз на ${days} дней`,
+      format: "md",
+    });
+
+    res.json({
+      success: true,
+      summary: summaryResult.summary,
+      tokensUsed: summaryResult.tokensUsed,
+      daysAnalyzed: forecastsData.length,
+      savedFile: {
+        filename: savedFile.filename,
+        path: savedFile.path,
+        size: savedFile.size,
+      },
+    });
+  } catch (error: any) {
+    console.error("[FORECAST SUMMARY ERROR]", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * Скачать сохранённый файл сводки
+ */
+app.get("/api/forecast/summary/download/:filename", async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const content = await fileWriterService.readFile(filename);
+
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(content);
+  } catch (error: any) {
+    console.error("[DOWNLOAD ERROR]", error);
+    res.status(404).json({
+      error: "File not found",
+    });
+  }
+});
+
+/**
+ * Список сохранённых файлов
+ */
+app.get("/api/forecast/summary/list", async (req, res) => {
+  try {
+    const files = await fileWriterService.listFiles();
+    res.json({
+      count: files.length,
+      files,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message,
+    });
+  }
+});
+
+// Получить список всех MCP инструментов
+app.get("/api/mcp/tools", async (req, res) => {
+  try {
+    console.log("[MCP] Getting available tools...");
+
+    const { ToolOrchestrator } = await import("./mcp/orchestratorAgent");
+    const orchestrator = new ToolOrchestrator();
+
+    await orchestrator.connectToServers();
+    const tools = await orchestrator.listAllTools();
+    await orchestrator.disconnect();
+
+    res.json({
+      success: true,
+      tools,
+      count: tools.length,
+    });
+  } catch (error: any) {
+    console.error("[MCP] Get tools error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// Запустить MCP pipeline
+app.post("/api/mcp/pipeline", async (req, res) => {
+  try {
+    const {
+      query,
+      days = 7,
+      searchType = "forecasts",
+      maxSummaryLength = 300,
+      fileFormat = "md",
+    } = req.body;
+
+    if (!query || typeof query !== "string" || !query.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Query is required",
+      });
+    }
+
+    console.log("[MCP PIPELINE] Starting...", { query, days, searchType });
+
+    const { ToolOrchestrator } = await import("./mcp/orchestratorAgent");
+    const orchestrator = new ToolOrchestrator();
+
+    await orchestrator.connectToServers();
+
+    const result = await orchestrator.executePipeline(query, {
+      days,
+      searchType,
+      maxSummaryLength,
+      fileFormat,
+    });
+
+    await orchestrator.disconnect();
+
+    console.log("[MCP PIPELINE] Completed successfully");
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[MCP PIPELINE ERROR]", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.stack,
     });
   }
 });

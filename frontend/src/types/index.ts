@@ -226,3 +226,54 @@ export interface ForecastStatsResponse {
     nextRun: string | null;
   };
 }
+
+// Summary API types
+export interface SummaryResponse {
+  success: boolean;
+  summary?: string;
+  tokensUsed?: number;
+  forecastsAnalyzed?: number;
+  daysAnalyzed?: number;
+  savedFile?: {
+    filename: string;
+    path: string;
+    size: number;
+  };
+  message?: string;
+  error?: string;
+}
+
+export interface SummaryListResponse {
+  count: number;
+  files: string[];
+}
+export interface MCPPipelineRequest {
+  query: string;
+  days?: number;
+  searchType?: "text" | "forecasts";
+  maxSummaryLength?: number;
+  fileFormat?: "md" | "txt" | "json";
+}
+
+export interface MCPPipelineResponse {
+  success: boolean;
+  query: string;
+  search: {
+    found: number;
+    type: string;
+    stats?: any;
+  };
+  summary: {
+    text: string;
+    original_length: number;
+    summary_length: number;
+    compression_ratio: string;
+    tokens_used: number;
+  };
+  file: {
+    filename: string;
+    filepath: string;
+    size: number;
+    createdAt: string;
+  };
+}

@@ -16,6 +16,10 @@ import {
   ForecastConfig,
   ForecastSummary,
   ForecastStatsResponse,
+  SummaryResponse,
+  SummaryListResponse,
+  MCPPipelineRequest,
+  MCPPipelineResponse,
 } from "./types";
 
 const API_BASE_URL = "";
@@ -448,5 +452,100 @@ export async function getForecastStats(): Promise<ForecastStatsResponse> {
     const error = await response.json();
     throw new Error(error.error || "Failed to get forecast stats");
   }
+  return response.json();
+}
+
+// ============================================
+// SUMMARY API
+// ============================================
+
+/**
+ * Создать ретроспективную сводку за N дней
+ */
+export async function createRetrospectiveSummary(
+  days: number = 7
+): Promise<SummaryResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}api/forecast/summary/retrospective`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ days }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to create retrospective summary");
+  }
+
+  return response.json();
+}
+
+/**
+ * Создать прогноз на N дней
+ */
+export async function createForecastSummary(
+  days: number = 7
+): Promise<SummaryResponse> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/summary/forecast`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ days }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to create forecast summary");
+  }
+
+  return response.json();
+}
+
+/**
+ * Получить список сохранённых сводок
+ */
+export async function listSummaries(): Promise<SummaryListResponse> {
+  const response = await fetch(`${API_BASE_URL}api/forecast/summary/list`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to list summaries");
+  }
+
+  return response.json();
+}
+
+/**
+ * Скачать файл сводки
+ */
+export function downloadSummary(filename: string): void {
+  const url = `${API_BASE_URL}api/forecast/summary/download/${filename}`;
+  window.open(url, "_blank");
+}
+
+/**
+ * Запустить MCP pipeline (Search → Summarize → Save)
+ */
+export async function runMCPPipeline(
+  request: MCPPipelineRequest
+): Promise<MCPPipelineResponse> {
+  const response = await fetch(`${API_BASE_URL}api/mcp/pipeline`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "MCP Pipeline failed");
+  }
+
   return response.json();
 }

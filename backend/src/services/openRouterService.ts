@@ -5,6 +5,15 @@ export interface Message {
   content: string;
 }
 
+export interface ToolCall {
+  id?: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: any;
+  };
+}
+
 interface OpenRouterRequest {
   model: string;
   messages: Message[];
@@ -13,6 +22,7 @@ interface OpenRouterRequest {
   top_p?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
+  tools?: any[];
 }
 
 interface OpenRouterResponse {
@@ -22,6 +32,14 @@ interface OpenRouterResponse {
     message: {
       role: string;
       content: string;
+      tool_calls?: Array<{
+        id: string;
+        type: "function";
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
     };
     finish_reason: string;
   }>;
@@ -38,7 +56,6 @@ export class OpenRouterService {
 
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY || "";
-
     if (!this.apiKey) {
       throw new Error("OPENROUTER_API_KEY должен быть установлен в .env");
     }
@@ -54,6 +71,7 @@ export class OpenRouterService {
    * @param topP - Top-p sampling (опционально)
    * @param frequencyPenalty - Штраф за повторения (опционально)
    * @param presencePenalty - Штраф за присутствие (опционально)
+   * @param tools - Массив инструментов для function calling (опционально)
    */
   async sendMessage(
     model: string,
@@ -63,7 +81,8 @@ export class OpenRouterService {
     maxTokens?: number,
     topP?: number,
     frequencyPenalty?: number,
-    presencePenalty?: number
+    presencePenalty?: number,
+    tools?: any[]
   ): Promise<{
     text: string;
     promptTokens: number;
@@ -71,12 +90,12 @@ export class OpenRouterService {
     totalTokens: number;
     latencyMs: number;
     model: string;
+    toolCalls?: ToolCall[];
   }> {
     const startTime = Date.now();
 
     // Формируем массив сообщений
     let messages: Message[];
-
     if (typeof message === "string") {
       // Простое сообщение - конвертируем в массив
       messages = [];
@@ -120,14 +139,21 @@ export class OpenRouterService {
     if (maxTokens !== undefined) {
       requestBody.max_tokens = maxTokens;
     }
+
     if (topP !== undefined) {
       requestBody.top_p = topP;
     }
+
     if (frequencyPenalty !== undefined) {
       requestBody.frequency_penalty = frequencyPenalty;
     }
+
     if (presencePenalty !== undefined) {
       requestBody.presence_penalty = presencePenalty;
+    }
+
+    if (tools && tools.length > 0) {
+      requestBody.tools = tools;
     }
 
     console.log(`[OPENROUTER] Calling ${model}`, {
@@ -135,6 +161,7 @@ export class OpenRouterService {
       maxTokens,
       messagesCount: messages.length,
       hasSystemPrompt: messages.some((m) => m.role === "system"),
+      toolsCount: requestBody.tools?.length || 0,
     });
 
     try {
@@ -153,14 +180,28 @@ export class OpenRouterService {
       );
 
       const latencyMs = Date.now() - startTime;
-
-      const text = response.data.choices[0]?.message?.content || "";
+      const choice = response.data.choices[0];
+      const text = choice?.message?.content || "";
       const usage = response.data.usage;
+
+      let toolCalls: ToolCall[] | undefined;
+      if (choice?.message?.tool_calls) {
+        toolCalls = choice.message.tool_calls.map((tc) => ({
+          id: tc.id,
+          type: "function" as const,
+          function: {
+            name: tc.function.name,
+            arguments: JSON.parse(tc.function.arguments),
+          },
+        }));
+      }
 
       console.log(`[OPENROUTER SUCCESS]`, {
         model,
         latencyMs,
         tokens: usage.total_tokens,
+        hasToolCalls: !!toolCalls,
+        toolCallsCount: toolCalls?.length || 0,
       });
 
       return {
@@ -170,6 +211,7 @@ export class OpenRouterService {
         totalTokens: usage.total_tokens || 0,
         latencyMs,
         model: response.data.model,
+        toolCalls,
       };
     } catch (error: any) {
       console.error("[OPENROUTER API ERROR]", {
@@ -197,6 +239,7 @@ export class OpenRouterService {
    * @param topP - Top-p sampling
    * @param frequencyPenalty - Штраф за повторения
    * @param presencePenalty - Штраф за присутствие
+   * @param tools - Инструменты для function calling
    */
   async sendDialog(
     model: string,
@@ -206,7 +249,8 @@ export class OpenRouterService {
     maxTokens?: number,
     topP?: number,
     frequencyPenalty?: number,
-    presencePenalty?: number
+    presencePenalty?: number,
+    tools?: any[]
   ) {
     return this.sendMessage(
       model,
@@ -216,7 +260,8 @@ export class OpenRouterService {
       maxTokens,
       topP,
       frequencyPenalty,
-      presencePenalty
+      presencePenalty,
+      tools
     );
   }
 
@@ -230,7 +275,6 @@ export class OpenRouterService {
           Authorization: `Bearer ${this.apiKey}`,
         },
       });
-
       return response.data.data;
     } catch (error: any) {
       console.error("[OPENROUTER GET MODELS ERROR]", error.message);

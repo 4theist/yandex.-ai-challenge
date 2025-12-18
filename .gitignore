@@ -40,3 +40,7 @@ coverage/
 *.tmp
 .cache/
 
+data/
+!data/.gitkeep
+!data/forecasts/
+!data/summaries/

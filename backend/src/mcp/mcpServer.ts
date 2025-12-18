@@ -1,4 +1,5 @@
 import "../config/env";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -10,6 +11,7 @@ import { callModel } from "../utils/modelCaller";
 import { compressionService } from "../services/compressionService";
 import { MODELS_CONFIG } from "../config/models";
 import { weatherService } from "../services/weatherService";
+
 // Определяем доступные MCP tools
 const TOOLS: Tool[] = [
   {
@@ -60,7 +62,6 @@ const TOOLS: Tool[] = [
       required: ["city"],
     },
   },
-
   {
     name: "call_ai_model",
     description: "Вызов AI модели (Yandex или OpenRouter) с заданным промптом",
@@ -289,6 +290,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ],
         };
       }
+
       case "get_current_weather": {
         const {
           city,
@@ -354,10 +356,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Запуск сервера
 async function main() {
   console.log("[MCP] Starting MCP server...");
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
   console.log("[MCP] Server running on stdio transport");
   console.log(`[MCP] Available tools: ${TOOLS.length}`);
   TOOLS.forEach((tool) => console.log(`  - ${tool.name}: ${tool.description}`));

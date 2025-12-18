@@ -8,6 +8,15 @@ export interface Message {
   text: string;
 }
 
+export interface ToolCall {
+  id?: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: any;
+  };
+}
+
 interface YandexRequest {
   modelUri: string;
   completionOptions: {
@@ -16,6 +25,7 @@ interface YandexRequest {
     maxTokens: number;
   };
   messages: Message[];
+  tools?: any[];
 }
 
 interface YandexResponse {
@@ -24,6 +34,14 @@ interface YandexResponse {
       message: {
         role: string;
         text?: string;
+        toolCallList?: {
+          toolCalls: Array<{
+            functionCall: {
+              name: string;
+              arguments: any;
+            };
+          }>;
+        };
       };
       status: string;
     }>;
@@ -58,13 +76,15 @@ export class YandexGPTService {
    * @param temperature - Температура генерации (0-1.2)
    * @param systemPrompt - Системный промпт (опционально)
    * @param maxTokens - Максимум токенов в ответе (по умолчанию 2000)
+   * @param tools - Массив инструментов для function calling (опционально)
    */
   async sendMessage(
     model: "yandexgpt" | "yandexgpt-lite",
     message: string | Message[],
     temperature: number = 0.6,
     systemPrompt?: string,
-    maxTokens: number = 2000
+    maxTokens: number = 2000,
+    tools?: any[]
   ): Promise<{
     text: string;
     promptTokens: number;
@@ -72,13 +92,13 @@ export class YandexGPTService {
     totalTokens: number;
     latencyMs: number;
     model: string;
+    toolCalls?: ToolCall[];
   }> {
     const modelUri = `gpt://${this.folderId}/${model}/latest`;
     const startTime = Date.now();
 
     // Формируем массив сообщений
     let messages: Message[];
-
     if (typeof message === "string") {
       // Простое сообщение - конвертируем в массив
       messages = [];
@@ -122,11 +142,24 @@ export class YandexGPTService {
       messages,
     };
 
+    // Добавляем tools если переданы
+    if (tools && tools.length > 0) {
+      // Конвертируем в формат YandexGPT
+      requestBody.tools = tools.map((tool) => ({
+        function: {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters,
+        },
+      }));
+    }
+
     console.log(`[YANDEX] Calling ${model}`, {
       temperature,
       maxTokens,
       messagesCount: messages.length,
       hasSystemPrompt: messages.some((m) => m.role === "system"),
+      toolsCount: requestBody.tools?.length || 0,
     });
 
     try {
@@ -144,14 +177,39 @@ export class YandexGPTService {
       );
 
       const latencyMs = Date.now() - startTime;
+      const alternative = response.data.result.alternatives[0];
 
-      const text = response.data.result.alternatives[0]?.message?.text || "";
+      // Логируем сырой ответ для отладки
+      console.log(
+        "[YANDEX RAW RESPONSE]",
+        JSON.stringify(alternative, null, 2)
+      );
+
+      const text = alternative?.message?.text || "";
+
+      // Парсим tool calls из Yandex формата
+      let toolCalls: ToolCall[] | undefined;
+      const yandexToolCalls = alternative?.message?.toolCallList?.toolCalls;
+
+      if (yandexToolCalls && yandexToolCalls.length > 0) {
+        toolCalls = yandexToolCalls.map((tc: any, index: number) => ({
+          id: `yandex_${index}`,
+          type: "function" as const,
+          function: {
+            name: tc.functionCall.name,
+            arguments: tc.functionCall.arguments,
+          },
+        }));
+      }
+
       const usage = response.data.result.usage;
 
       console.log(`[YANDEX SUCCESS]`, {
         model,
         latencyMs,
         tokens: usage.totalTokens,
+        hasToolCalls: !!toolCalls,
+        toolCallsCount: toolCalls?.length || 0,
       });
 
       return {
@@ -161,6 +219,7 @@ export class YandexGPTService {
         totalTokens: usage.totalTokens || 0,
         latencyMs,
         model,
+        toolCalls,
       };
     } catch (error: any) {
       console.error("[YANDEX API ERROR]", {
@@ -184,20 +243,23 @@ export class YandexGPTService {
    * @param temperature - Температура
    * @param systemPrompt - Системный промпт (опционально)
    * @param maxTokens - Максимум токенов
+   * @param tools - Инструменты для function calling
    */
   async sendDialog(
     model: "yandexgpt" | "yandexgpt-lite",
     messages: Message[],
     temperature: number = 0.6,
     systemPrompt?: string,
-    maxTokens: number = 2000
+    maxTokens: number = 2000,
+    tools?: any[]
   ) {
     return this.sendMessage(
       model,
       messages,
       temperature,
       systemPrompt,
-      maxTokens
+      maxTokens,
+      tools
     );
   }
 }

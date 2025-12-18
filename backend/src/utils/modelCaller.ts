@@ -4,10 +4,12 @@ import {
   YandexGPTService,
   Message as YandexMessage,
 } from "../services/yandexService";
+
 import {
   OpenRouterService,
   Message as OpenRouterMessage,
 } from "../services/openRouterService";
+
 import { calculateCost } from "./pricing";
 import { getModelInfo } from "../config/models";
 
@@ -28,18 +30,30 @@ function getOpenRouterService() {
   return openRouterService;
 }
 
+// ← ДОБАВЛЕНО: интерфейс для tool calls
+export interface ToolCall {
+  id?: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: any;
+  };
+}
+
 export interface ModelCallOptions {
   systemPrompt?: string;
   maxTokens?: number;
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  tools?: any[]; // ← ДОБАВЛЕНО: массив инструментов
 }
 
 export interface ModelResult {
   provider: string;
   model: string;
   text: string;
+  toolCalls?: ToolCall[]; // ← ДОБАВЛЕНО: tool calls из ответа модели
   metrics: {
     latencyMs: number;
     promptTokens: number;
@@ -62,7 +76,7 @@ export interface ModelResult {
  * @param model - ID модели
  * @param message - Сообщение или массив сообщений для диалога
  * @param temperature - Температура генерации
- * @param options - Дополнительные опции (systemPrompt, maxTokens и т.д.)
+ * @param options - Дополнительные опции (systemPrompt, maxTokens, tools и т.д.)
  */
 export async function callModel(
   provider: "yandex" | "openrouter",
@@ -79,6 +93,8 @@ export async function callModel(
     temperature,
     hasSystemPrompt: !!options?.systemPrompt,
     maxTokens: options?.maxTokens,
+    hasTools: !!options?.tools, // ← ДОБАВЛЕНО
+    toolsCount: options?.tools?.length || 0, // ← ДОБАВЛЕНО
   });
 
   try {
@@ -87,7 +103,6 @@ export async function callModel(
     if (provider === "yandex") {
       // Конвертируем сообщения в формат Yandex если это массив
       let yandexMessage: string | YandexMessage[];
-
       if (typeof message === "string") {
         yandexMessage = message;
       } else {
@@ -103,12 +118,16 @@ export async function callModel(
         yandexMessage,
         temperature,
         options?.systemPrompt,
-        options?.maxTokens
+        options?.maxTokens,
+        options?.tools
+      );
+      console.log(
+        "[MODEL CALLER] Tools being sent:",
+        JSON.stringify(options?.tools, null, 2)
       );
     } else {
       // OpenRouter
       let openRouterMessage: string | OpenRouterMessage[];
-
       if (typeof message === "string") {
         openRouterMessage = message;
       } else {
@@ -127,7 +146,8 @@ export async function callModel(
         options?.maxTokens,
         options?.topP,
         options?.frequencyPenalty,
-        options?.presencePenalty
+        options?.presencePenalty,
+        options?.tools // ← ДОБАВЛЕНО: передаём tools
       );
     }
 
@@ -158,12 +178,14 @@ export async function callModel(
       model,
       tokens: result.totalTokens,
       cost: `${cost} ${currency}`,
+      toolCalls: result.toolCalls?.length || 0, // ← ДОБАВЛЕНО
     });
 
     return {
       provider,
       model,
       text: result.text,
+      toolCalls: result.toolCalls, // ← ДОБАВЛЕНО: возвращаем tool calls
       metrics: {
         latencyMs: result.latencyMs,
         promptTokens: result.promptTokens,
