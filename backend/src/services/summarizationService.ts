@@ -53,9 +53,11 @@ ${dataForAnalysis}
       const response = await this.yandex.sendMessage(
         "yandexgpt-lite", // Используем lite для экономии
         prompt,
-        0.3, // Низкая температура для стабильности
-        "Ты создаёшь краткие погодные сводки на основе исторических данных.",
-        500 // Лимит токенов
+        {
+          temperature: 0.3, // Низкая температура для стабильности
+          systemPrompt: "Ты создаёшь краткие погодные сводки на основе исторических данных.",
+          maxTokens: 500, // Лимит токенов
+        }
       );
 
       console.log(
@@ -113,9 +115,11 @@ ${dataForAnalysis}
       const response = await this.yandex.sendMessage(
         "yandexgpt-lite",
         prompt,
-        0.3,
-        "Ты создаёшь краткие прогнозы погоды.",
-        500
+        {
+          temperature: 0.3,
+          systemPrompt: "Ты создаёшь краткие прогнозы погоды.",
+          maxTokens: 500,
+        }
       );
 
       console.log(
@@ -187,9 +191,11 @@ ${text}
       const response = await this.yandex.sendMessage(
         "yandexgpt-lite",
         prompt,
-        0.3,
-        "Ты создаёшь краткие резюме текстов.",
-        500
+        {
+          temperature: 0.3,
+          systemPrompt: "Ты создаёшь краткие резюме текстов.",
+          maxTokens: 500,
+        }
       );
 
       return {

@@ -1,34 +1,10 @@
 import "../config/env";
 
-import {
-  YandexGPTService,
-  Message as YandexMessage,
-} from "../services/yandexService";
-
-import {
-  OpenRouterService,
-  Message as OpenRouterMessage,
-} from "../services/openRouterService";
-
+import type { LLMMessage } from "../services/llm/baseLLMService";
+import { getYandexService, getOpenRouterService } from "./serviceFactory";
 import { calculateCost } from "./pricing";
 import { getModelInfo } from "../config/models";
-
-let yandexService: YandexGPTService | null = null;
-let openRouterService: OpenRouterService | null = null;
-
-function getYandexService() {
-  if (!yandexService) {
-    yandexService = new YandexGPTService();
-  }
-  return yandexService;
-}
-
-function getOpenRouterService() {
-  if (!openRouterService) {
-    openRouterService = new OpenRouterService();
-  }
-  return openRouterService;
-}
+import { MessageConverter } from "./messageConverter";
 
 // ← ДОБАВЛЕНО: интерфейс для tool calls
 export interface ToolCall {
@@ -100,26 +76,19 @@ export async function callModel(
   try {
     let result;
 
-    if (provider === "yandex") {
-      // Конвертируем сообщения в формат Yandex если это массив
-      let yandexMessage: string | YandexMessage[];
-      if (typeof message === "string") {
-        yandexMessage = message;
-      } else {
-        // Конвертируем OpenRouter формат в Yandex формат
-        yandexMessage = message.map((msg: any) => ({
-          role: msg.role,
-          text: msg.content || msg.text,
-        }));
-      }
+    // Нормализуем сообщения в унифицированный формат
+    const convertedMessage = MessageConverter.normalize(message);
 
+    if (provider === "yandex") {
       result = await getYandexService().sendMessage(
         model as "yandexgpt" | "yandexgpt-lite",
-        yandexMessage,
-        temperature,
-        options?.systemPrompt,
-        options?.maxTokens,
-        options?.tools
+        convertedMessage,
+        {
+          temperature,
+          systemPrompt: options?.systemPrompt,
+          maxTokens: options?.maxTokens,
+          tools: options?.tools,
+        }
       );
       console.log(
         "[MODEL CALLER] Tools being sent:",
@@ -127,27 +96,18 @@ export async function callModel(
       );
     } else {
       // OpenRouter
-      let openRouterMessage: string | OpenRouterMessage[];
-      if (typeof message === "string") {
-        openRouterMessage = message;
-      } else {
-        // Конвертируем Yandex формат в OpenRouter формат
-        openRouterMessage = message.map((msg: any) => ({
-          role: msg.role,
-          content: msg.text || msg.content,
-        }));
-      }
-
       result = await getOpenRouterService().sendMessage(
         model,
-        openRouterMessage,
-        temperature,
-        options?.systemPrompt,
-        options?.maxTokens,
-        options?.topP,
-        options?.frequencyPenalty,
-        options?.presencePenalty,
-        options?.tools // ← ДОБАВЛЕНО: передаём tools
+        convertedMessage,
+        {
+          temperature,
+          systemPrompt: options?.systemPrompt,
+          maxTokens: options?.maxTokens,
+          topP: options?.topP,
+          frequencyPenalty: options?.frequencyPenalty,
+          presencePenalty: options?.presencePenalty,
+          tools: options?.tools,
+        }
       );
     }
 

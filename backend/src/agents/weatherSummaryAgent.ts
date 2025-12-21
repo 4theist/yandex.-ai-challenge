@@ -55,9 +55,11 @@ class WeatherSummaryAgent {
         const response = await this.yandex.sendMessage(
           "yandexgpt-lite",
           prompt,
-          0.3,
-          "Ты создаёшь краткие погодные сводки. Пиши кратко и ёмко.",
-          100
+          {
+            temperature: 0.3,
+            systemPrompt: "Ты создаёшь краткие погодные сводки. Пиши кратко и ёмко.",
+            maxTokens: 100,
+          }
         );
 
         totalTokens += response.totalTokens;

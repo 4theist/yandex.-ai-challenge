@@ -95,9 +95,11 @@ ${weatherInfo}
     const aiResponse = await yandexService.sendMessage(
       "yandexgpt",
       prompt,
-      0.6,
-      systemPrompt,
-      2000
+      {
+        temperature: 0.6,
+        systemPrompt,
+        maxTokens: 2000,
+      }
     );
 
     console.log("\n" + "=".repeat(60));

@@ -1,23 +1,5 @@
 import { Message, Summary } from "./sessionManager";
-import { YandexGPTService } from "./yandexService";
-import { OpenRouterService } from "./openRouterService";
-
-let yandexService: YandexGPTService | null = null;
-let openRouterService: OpenRouterService | null = null;
-
-function getYandexService() {
-  if (!yandexService) {
-    yandexService = new YandexGPTService();
-  }
-  return yandexService;
-}
-
-function getOpenRouterService() {
-  if (!openRouterService) {
-    openRouterService = new OpenRouterService();
-  }
-  return openRouterService;
-}
+import { getYandexService, getOpenRouterService } from "../utils/serviceFactory";
 
 export class CompressionService {
   /**
@@ -68,13 +50,13 @@ ${dialogText}
         result = await getYandexService().sendMessage(
           model as "yandexgpt" | "yandexgpt-lite",
           summaryPrompt,
-          temperature
+          { temperature }
         );
       } else {
         result = await getOpenRouterService().sendMessage(
           model,
           summaryPrompt,
-          temperature
+          { temperature }
         );
       }
 
