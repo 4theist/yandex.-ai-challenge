@@ -107,7 +107,10 @@ export class ShellExecutor {
       const executionTime = Date.now() - startTime;
       const output = stdout.trim();
       const errorOutput = stderr.trim();
-
+      logger.info("ShellExecutor", `Command output: "${output}"`, {
+        stdout: stdout,
+        stderr: stderr,
+      });
       logger.info("ShellExecutor", `Command completed in ${executionTime}ms`, {
         command: trimmedCommand,
         exitCode: 0,
