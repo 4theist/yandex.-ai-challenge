@@ -6,11 +6,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+
 import { callModel } from "../utils/modelCaller";
 import { compressionService } from "../services/compressionService";
 import { MODELS_CONFIG } from "../config/models";
 import { weatherService } from "../services/weatherService";
 import { TOOLS } from "./tools/definitions";
+import { shellExecutor } from "./tools/shellExecutor"; // ⬅️ НОВЫЙ ИМПОРТ
 
 // Создаем MCP сервер
 const server = new Server(
@@ -34,7 +36,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // Обработчик вызова инструментов
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   console.log(`[MCP] Tool called: ${request.params.name}`);
-
   try {
     switch (request.params.name) {
       case "call_ai_model": {
@@ -178,6 +179,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: responseText,
+            },
+          ],
+        };
+      }
+
+      case "execute_command": {
+        const { command } = request.params.arguments as any;
+
+        const result = await shellExecutor.executeCommand(command);
+
+        // Форматируем результат для агента
+        const formattedResult = result.success
+          ? `✅ Команда выполнена успешно (${result.executionTime}ms)\n\nКоманда: ${result.command}\n\nВывод:\n${result.output}`
+          : `❌ Ошибка выполнения команды (${result.executionTime}ms)\n\nКоманда: ${result.command}\n\nОшибка:\n${result.error}\n\nВывод:\n${result.output}`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: formattedResult,
             },
           ],
         };

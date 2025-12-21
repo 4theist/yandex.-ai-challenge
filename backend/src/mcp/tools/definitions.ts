@@ -156,4 +156,20 @@ export const TOOLS: Tool[] = [
       required: ["messages", "provider", "model"],
     },
   },
+  {
+    name: "execute_command",
+    description:
+      "Выполнить shell команду на VPS (тесты, git, pm2 status, системная информация). Только безопасные команды из whitelist.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description:
+            "Shell команда для выполнения. Разрешены: npm test, npm run test:*, pm2 status, pm2 list, git status, git log, df -h, free -m, uptime",
+        },
+      },
+      required: ["command"],
+    },
+  },
 ];
