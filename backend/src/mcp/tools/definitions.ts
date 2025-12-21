@@ -159,7 +159,7 @@ export const TOOLS: Tool[] = [
   {
     name: "execute_command",
     description:
-      "Выполнить shell команду на VPS (тесты, git, pm2 status, системная информация). Только безопасные команды из whitelist.",
+      "Выполнить shell команду на VPS в указанном проекте. Агент должен сам определить, в каком проекте запускать команду на основе запроса пользователя.",
     inputSchema: {
       type: "object",
       properties: {
@@ -167,6 +167,13 @@ export const TOOLS: Tool[] = [
           type: "string",
           description:
             "Shell команда для выполнения. Разрешены: npm test, npm run test:*, pm2 status, pm2 list, git status, git log, df -h, free -m, uptime",
+        },
+        project: {
+          type: "string",
+          enum: ["backend", "frontend", "root"],
+          description:
+            "В каком проекте выполнить команду. 'backend' - серверная часть, 'frontend' - клиентская часть, 'root' - корень монорепо. По умолчанию 'backend'.",
+          default: "backend",
         },
       },
       required: ["command"],

@@ -13,6 +13,8 @@ import { MODELS_CONFIG } from "../config/models";
 import { weatherService } from "../services/weatherService";
 import { TOOLS } from "./tools/definitions";
 import { shellExecutor } from "./tools/shellExecutor"; // ⬅️ НОВЫЙ ИМПОРТ
+import { CONFIG } from "../config/defaults";
+import { logger } from "../utils/logger";
 
 // Создаем MCP сервер
 const server = new Server(
@@ -185,14 +187,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "execute_command": {
-        const { command } = request.params.arguments as any;
+        const { command, project = "backend" } = request.params.arguments as {
+          command: string;
+          project?: "backend" | "frontend" | "root";
+        };
 
-        const result = await shellExecutor.executeCommand(command);
+        // Получаем правильную директорию на основе project
+        const projectPath = CONFIG.SHELL.PROJECT_PATHS[project];
+
+        logger.info("MCP", `Executing command in ${project} project`, {
+          command,
+          path: projectPath,
+        });
+
+        const result = await shellExecutor.executeCommand(command, projectPath);
 
         // Форматируем результат для агента
         const formattedResult = result.success
-          ? `✅ Команда выполнена успешно (${result.executionTime}ms)\n\nКоманда: ${result.command}\n\nВывод:\n${result.output}`
-          : `❌ Ошибка выполнения команды (${result.executionTime}ms)\n\nКоманда: ${result.command}\n\nОшибка:\n${result.error}\n\nВывод:\n${result.output}`;
+          ? `✅ Команда выполнена успешно в проекте **${project}** (${result.executionTime}ms)\n\n📁 Директория: ${projectPath}\n💻 Команда: ${result.command}\n\n📄 Вывод:\n${result.output}`
+          : `❌ Ошибка выполнения команды в проекте **${project}** (${result.executionTime}ms)\n\n📁 Директория: ${projectPath}\n💻 Команда: ${result.command}\n\n🚨 Ошибка:\n${result.error}\n\n📄 Вывод:\n${result.output}`;
 
         return {
           content: [

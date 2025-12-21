@@ -72,7 +72,10 @@ export class ShellExecutor {
   /**
    * Выполнение shell команды с проверкой безопасности
    */
-  async executeCommand(command: string): Promise<CommandResult> {
+  async executeCommand(
+    command: string,
+    customWorkDir?: string
+  ): Promise<CommandResult> {
     const startTime = Date.now();
     const trimmedCommand = command.trim();
 
